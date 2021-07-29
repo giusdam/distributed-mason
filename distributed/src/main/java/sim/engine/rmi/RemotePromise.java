@@ -10,10 +10,9 @@ public class RemotePromise extends UnicastRemoteObject implements Promised {
 
 	boolean ready = false;
 	Serializable object = null;
-
-	public int tag; 
-	public Serializable args;
-	public String promiseId;
+	public int tag; //tag used to understand which method to use to fill the promise
+	public Serializable args; // optional arguments that could be needed
+	public String promiseId; // id used to register the promise on the registry
 
 	public void setPromiseId(String id){
 		this.promiseId = id;

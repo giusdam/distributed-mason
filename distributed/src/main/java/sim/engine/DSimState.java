@@ -74,7 +74,7 @@ public class DSimState extends SimState
 	// The RMI registry
 	protected DRegistry registry;
 
-	// FIXME: what is this for?
+	// Flag to understand if the registry is enabled
 	public static boolean withRegistry;
 
 	// The number of steps between load balances
@@ -232,17 +232,16 @@ public class DSimState extends SimState
 			// Wait for all agents globally to stop moving
 			MPI.COMM_WORLD.barrier();
 
-			// DEBUG QUESTO CREA QUALCHE PROBLEMA
-			// if (withRegistry) {
-			// 	try {
-			// 		for (RemotePromise promisesFilled : filledPromises) {
-			// 			this.getDRegistry().unRegisterObject(promisesFilled.getPromiseId());
-			// 		}
-			// 		filledPromises.clear();
-			// 	} catch (Exception e) {
-			// 		e.printStackTrace();
-			// 	}
-			// }
+			if (withRegistry) {
+				try {
+					for (RemotePromise promisesFilled : filledPromises) {
+						this.getDRegistry().unRegisterObject(promisesFilled.getPromiseId());
+					}
+					filledPromises.clear();
+				} catch (Exception e) {
+					e.printStackTrace();
+				}
+			}
 
 			// give time for Visualizer
 			try
@@ -262,7 +261,7 @@ public class DSimState extends SimState
 				for(DObject objWithPromises : globalRemotePromises) {
 					// check if the agent is migrated or not
 					
-					if (!DRegistry.getInstance().getMigratedNames().contains(objWithPromises.getRemoteId())) {
+					if (!DRegistry.getInstance().getMigratedNames().contains(objWithPromises.getExportedName())) {
 						
 						// search for all the promises within the agent
 						for (RemotePromise promise : objWithPromises.getUnfilledPromises()){
@@ -281,9 +280,7 @@ public class DSimState extends SimState
 				}
 				globalRemotePromises.clear();
 			}
-
-		
-			
+	
 			// Sync all the Remove and Add queues for RMI
 			syncRemoveAndAdd();
 			
@@ -299,9 +296,7 @@ public class DSimState extends SimState
 				{
 					try
 					{
-						// System.out.println("Object unregistered " + mo);
-						boolean unregister = DRegistry.getInstance().unRegisterObject(mo);
-						// if(unregister) System.out.println("Unregistered object");
+						DRegistry.getInstance().unRegisterObject(mo);
 					}
 					catch (NotBoundException e)
 					{
@@ -310,43 +305,30 @@ public class DSimState extends SimState
 				}
 				DRegistry.getInstance().clearMigratedNames();
 				MPI.COMM_WORLD.barrier();
-
-	
 			}
-
-			
 		}
 		catch (ClassNotFoundException | MPIException | IOException e)
 		{
 			throw new RuntimeException(e);
 		}
 
-		try {
-			MPI.COMM_WORLD.barrier();
-		} catch (MPIException e1) {
-			// TODO Auto-generated catch block
-			e1.printStackTrace();
-		}
 		for (final PayloadWrapper payloadWrapper : transporter.objectQueue)
 		{
-			DObject mobj =
-						payloadWrapper.payload instanceof DistributedIterativeRepeat?
-							((DObject) ((DistributedIterativeRepeat)payloadWrapper.payload).getSteppable()):
-								(payloadWrapper.payload instanceof AgentWrapper?
-									((DObject) ((AgentWrapper)payloadWrapper.payload).agent):
-										null);
+			DObject mobj = null;
+
+			if(payloadWrapper.payload instanceof DistributedIterativeRepeat)
+				mobj = ((DObject) ((DistributedIterativeRepeat)payloadWrapper.payload).getSteppable());
+			else if ((payloadWrapper.payload instanceof AgentWrapper))
+				mobj = ((DObject) ((AgentWrapper)payloadWrapper.payload).agent);
 
 			if (withRegistry && mobj!=null)
 				{
 					
 					if (mobj.getExportedName() != null)
 					{
-						// System.out.println("----------- RICEVUTO AGENTE ESPORTATO "+((DObject)iterativeRepeat.getSteppable()).getExportedName() );
 						try
 						{
-							DRegistry.getInstance().registerObject(mobj.getExportedName(),
-									(Remote) mobj);
-
+							DRegistry.getInstance().registerObject(mobj.getExportedName(), (Remote) mobj);
 							DObject objWithPromises = (DObject) (mobj);
 							// search for all the promises within the agent
 							for (RemotePromise promise : objWithPromises.getUnfilledPromises()){
@@ -393,13 +375,11 @@ public class DSimState extends SimState
 				// "the time provided (-1.0000000000000002) is < EPOCH (0.0)"
 
 				Stopping stopping = iterativeRepeat.getSteppable();
-				stopping.setStoppable(
-						schedule.scheduleRepeating(stopping, iterativeRepeat.getOrdering(), iterativeRepeat.interval));
-				
+				stopping.setStoppable(schedule.scheduleRepeating(stopping, iterativeRepeat.getOrdering(), iterativeRepeat.interval));
+
 			}
 			else if (payloadWrapper.payload instanceof AgentWrapper)
 			{
-			
 				final AgentWrapper agentWrapper = (AgentWrapper) payloadWrapper.payload;
 
 				if (agentWrapper.time < 0)
@@ -470,13 +450,7 @@ public class DSimState extends SimState
 						// add the object to the field
 						fieldList.get(payloadWrapper.fieldIndex).addPayload(payloadWrapper);
 						//verify it was added to the correct location!
-						
-
 					}
-					
-					
-
-					
 
 					// DistributedIterativeRepeat
 					if (payloadWrapper.payload instanceof DistributedIterativeRepeat)
@@ -520,12 +494,8 @@ public class DSimState extends SimState
 						else
 							schedule.scheduleOnce(agentWrapper.time, agentWrapper.ordering, agentWrapper.agent);
 					}
-					
-
 				}
 
-
-				
 				// Wait that all nodes have registered their new objects in the distributed registry.
 				try
 				{
@@ -565,8 +535,6 @@ public class DSimState extends SimState
 				throw new RuntimeException(e);
 			}
 		}
-		
-
 	}
 
 	/*
@@ -576,8 +544,6 @@ public class DSimState extends SimState
 	 */
 	void balancePartitions(int level) throws MPIException
 	{
-		
-
 		int x = countTotalAgents(fieldList.get(0));
 
 		if (this.getPID() == 0) {
@@ -603,7 +569,6 @@ public class DSimState extends SimState
 		for (Synchronizable field : fieldList)
 		{
 
-			
 			ArrayList<Object> migratedAgents = new ArrayList<>();
 			HaloGrid2D haloGrid2D = (HaloGrid2D) field;
 
@@ -681,7 +646,6 @@ public class DSimState extends SimState
 							else if (old_partition.contains(loc) && !partition.getLocalBounds().contains(loc))
 							{
 								final int locToP = partition.toPartitionPID(loc); // we need to use this, not toP
-								// System.out.println("@@@@@@@@@@@@@@@@ Transport Object " + a);
 								transporter.transportObject((Serializable) a, locToP, loc, ((HaloGrid2D) field).getFieldIndex());
 							}
 						}
@@ -723,21 +687,12 @@ public class DSimState extends SimState
 							for (int i = ((ArrayList<Serializable>) a_list).size() - 1; i >= 0; i--)
 							{
 								Serializable a = ((ArrayList<Serializable>) a_list).get(i);
-								
-								
-								
-
-								
-
-								
-								
+						
 								// if a is stoppable
 								if (a != null && a instanceof Stopping && !migratedAgents.contains(a)
 										&& old_partition.contains(p) && !partition.getLocalBounds().contains(p))
 								{
 									DSteppable stopping = ((DSteppable) a);
-									
-									
 
 									// stop and migrate
 									if (stopping.getStoppable() instanceof DistributedTentativeStep)
@@ -769,18 +724,12 @@ public class DSimState extends SimState
 									// haloGrid2D.removeLocal(p, stopping.ID());
 									
 									st.removeObject(p, stopping.ID());
-									
-						
-									
-
-
 
 								}
 
 								// not stoppable (transport a double or something) transporter call transportObject?
 								else if (old_partition.contains(p) && !partition.getLocalBounds().contains(p) && !migratedAgents.contains(a))
 								{
-									// System.out.println("@@@@@@@@@@@@@@@@ Transport Object " + a);
 									transporter.transportObject((Serializable) a, toP, p,
 											((HaloGrid2D) field).getFieldIndex());
 								}
@@ -793,18 +742,10 @@ public class DSimState extends SimState
 						}
 					}
 				}
-				
-				//((HaloGrid2D) field).loc_disagree_all_points("bp3");
-
-
 			}
 		}
 		MPI.COMM_WORLD.barrier();
 		Timing.stop(Timing.LB_OVERHEAD);
-		
-		//System.out.println("done balancing");
-
-
 	}
 
 	static void initRemoteLogger(final String loggerName, final String logServAddr, final int logServPort)
@@ -1246,50 +1187,13 @@ public class DSimState extends SimState
 					if (a_list != null)
 					{
 						count = count + ((ArrayList<Serializable>) a_list).size();
-					}
-					
-			
-			
-			
+					}	
 				}
 			}
 		}
-		
 		return count;
-		
 	}
-	
-	/**
-	 * Looks up for the object with name to get data
-	 * Creates an unfilled RemotePromise that contains the request of some processor.
-	 * Calls addRemotePromise to put the RemotePromise in the queue of its processor.
-	 * 
-	 * @param name is the name of the required object that has the data and has to fulfill the promise
-	 * @param tag is used to understand what data is required from the object  
-	 * 	(the designer can implement different methods and choose what to call using this)
-	 * @param argument is the optional argument to pass to the object from we want the data 
-	 * 
-	 * @return a RemotePromise that will be filled out
-	 */
-	// public Promised contactRemoteObj(String name, Integer tag, Serializable argument) throws RemoteException, NotBoundException {
-	// 	Distinguished remoteObject = (Distinguished) this.getDRegistry().getObject(name);
-	// 	RemotePromise promiseUnfilled = new RemotePromise(); 
-	// 	DSimState.addRemotePromise(promiseUnfilled, tag, argument, remoteObject);
-	// 	return promiseUnfilled;
-	// }
-	
-	/**
-	 * Add a RemotePromise to the queue.
-	 * The promise will be filled then.
-	 * The promise needs information about:
-	 * @param tag provides information about what data is required  
-	 * @param argument is the optional argument that could be needed in the method respondToRemote()
-	 * @param author that will fill the promise,
-	 */
-	// public static void addRemotePromise(RemotePromise promise, Integer tag, Serializable argument, Distinguished author) {
-	// 	promises.add(new Quartet<RemotePromise, Integer, Serializable, Distinguished>(promise, tag, argument, author));
-	// }
-	
+
 	/*
 	public static void loc_disagree(Int2D p, DHeatBug h, Partition p2, String s)
 	{

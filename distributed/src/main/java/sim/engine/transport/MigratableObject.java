@@ -11,7 +11,7 @@ import java.io.Serializable;
 public interface MigratableObject extends Serializable
 {
 	
-	public void setExportedName(String export_name);
+	public void setExportedName(String exportName);
 	public String getExportedName();
 
 }

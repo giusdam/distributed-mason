@@ -11,6 +11,8 @@ import sim.engine.Stopping;
  */
 public class AgentWrapper implements Serializable
 {
+	
+	private static final long serialVersionUID = 1L;
 
 	/**
 	 * Ordering for the scheduler <br>

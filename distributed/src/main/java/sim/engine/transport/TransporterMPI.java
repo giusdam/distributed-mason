@@ -18,7 +18,6 @@ import sim.engine.DistributedIterativeRepeat;
 import sim.engine.Stopping;
 import sim.field.partitioning.Partition;
 import sim.util.*;
-import sim.engine.*;
 
 /**
  * This class contains the methods for moving objects and agents between
@@ -305,7 +304,6 @@ public class TransporterMPI
 	public void transportObject(final Serializable obj, final int dst, final NumberND loc,
 			final int fieldIndex)
 	{
-		// System.out.println("!!!!!!!!!!!!!!! Transport object " + obj);
 		if (partition.getPID() == dst)
 			throw new IllegalArgumentException("Destination cannot be local, must be remote");
 
@@ -314,14 +312,9 @@ public class TransporterMPI
 		// Wrap the agent, this is important because we want to keep track of
 		// dst, which could be the diagonal processor
 		final PayloadWrapper wrapper = new PayloadWrapper(dst, obj, loc, fieldIndex);
-		// System.out.println("------------------------ SONO "+DSimState.withRegistry);
-		if (DSimState.withRegistry)
-		{
-		
-			String name = DRegistry.getInstance().ifExportedThenAddMigratedName(obj);
-			// System.out.println("---------------------------------Nu cazz a vot! "+ name);
-			
-		}
+
+		if (DSimState.withRegistry)		
+			DRegistry.getInstance().ifExportedThenAddMigratedName(obj);
 
 		assert dstMap.containsKey(dst);
 		try

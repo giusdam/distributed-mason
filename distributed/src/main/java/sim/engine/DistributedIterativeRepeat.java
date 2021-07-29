@@ -6,14 +6,12 @@
 
 package sim.engine;
 
-import sim.engine.transport.MigratableObject;
-
 /**
  * Changes constructor to set Stoppable. Overrides stop() to set Stoppable as null
  */
 public class DistributedIterativeRepeat extends IterativeRepeat 
 {
-
+	private static final long serialVersionUID = 1;
 
 	public DistributedIterativeRepeat(final Stopping step, final double time, final double interval, final int ordering)
 	{

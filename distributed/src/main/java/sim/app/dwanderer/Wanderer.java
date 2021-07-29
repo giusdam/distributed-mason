@@ -43,7 +43,7 @@ public class Wanderer extends DSteppable {
 		String otherAgentID;
 
 		// check if I am agent A or agent B
-		if (this.getRemoteId().equals("agentA")) {
+		if (this.getExportedName().equals("agentA")) {
 			// I am agent A and I want data from agent B
 			myAgentID = "agentA";
 			otherAgentID = "agentB";
@@ -63,7 +63,7 @@ public class Wanderer extends DSteppable {
 				if (promise.isReady()) {
 					// the promise is ready, I can use the content
 					System.out.println(
-							"I am " + myAgentID + " on proc " + myPID + " and " + otherAgentID + " promise has " + promise.get());
+							"I am " + myAgentID + " on proc " + myPID + " with loc " + loc + " - Promise from " + otherAgentID + " contains: " + promise.get());
 					// add the promiseID in the completed queue
 					remotePromiseCompleted.add(promiseID);
 				}
@@ -135,7 +135,7 @@ public class Wanderer extends DSteppable {
 	public Serializable fillRemotePromise(Integer tag, Serializable argument) {
 		switch (tag) {
 			case 0:
-				return "- PID " + this.myPID + " loc " + this.loc;
+				return " I am on proc " + myPID + " with loc " + loc;
 			case 1:
 				return this.loc;
 		}

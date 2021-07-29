@@ -31,7 +31,7 @@ contrib/geomason/repository/jars/ebolaData.jar
 contrib/geomason/repository/jars/hotspotsData.jar
 contrib/geomason/repository/jars/refugeeData.jar
 contrib/geomason/repository/jars/swiselib.jar
-kiberaData.jar
+*.jar
 mason/bin
 contrib/distributed-geomason/docs
 contrib/distributed-geomason/jar

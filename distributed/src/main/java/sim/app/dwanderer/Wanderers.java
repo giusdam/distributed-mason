@@ -53,12 +53,12 @@ public class Wanderers extends DSimState {
 			agentA = new Wanderer(locationA);
 			agentB = new Wanderer(locationB);
 
-			agentA.setRemoteId(agentAName);
+			agentA.setExportedName(agentAName);
 			boolean test = this.getDRegistry().registerObject(agentAName, agentA);
 			if(!test) System.exit(-1);
 			System.out.println("Agent A registered with ID: " + agentAName + " with position " + locationA);
 
-			agentB.setRemoteId(agentBName);
+			agentB.setExportedName(agentBName);
 			if(!test) System.exit(-1);
 			this.getDRegistry().registerObject(agentBName, agentB);
 			System.out.println("Agent B registered with ID: " + agentBName + " with position " + locationB);

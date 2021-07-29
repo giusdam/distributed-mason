@@ -11,8 +11,8 @@ import java.rmi.Remote;
 import java.rmi.RemoteException;
 
 /*
- * Interface that should be implemented by a class that needs to be a remote (Distinguish) Object
- * The modeler needs to implement the method of the class based on needs
+ * Interface to enable the distinguished mechanism making possible the remote communication
+ * of agents using RMI
  */
 
 public interface Distinguished extends Remote {
@@ -25,7 +25,7 @@ public interface Distinguished extends Remote {
 	 * @param argument is the optional argument that could be needed
 	 * 
 	 */
-	public String createRemotePromise(int tag, Serializable args)  throws RemoteException;
+	public String createRemotePromise(int tag, Serializable args) throws RemoteException;
 
 	/**
 	 * Respond to a remote request of some data. The method is used to fulfill a
@@ -37,7 +37,5 @@ public interface Distinguished extends Remote {
 	 * 
 	 */
 	public Serializable fillRemotePromise(Integer tag, Serializable argument) throws RemoteException;
-
-
 
 }

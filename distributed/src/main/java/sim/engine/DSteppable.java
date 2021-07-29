@@ -6,16 +6,10 @@
 
 package sim.engine;
 
-import java.rmi.RemoteException;
-
 /** A simple implementation of Stopping in a Steppable. */
 
 public abstract class DSteppable extends DObject implements Stopping
 {
-	public DSteppable(){
-		super();
-	}
-
 	private static final long serialVersionUID = 1L;
 
 	Stoppable stop = null;
