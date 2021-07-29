@@ -12,7 +12,7 @@ import java.rmi.RemoteException;
 
 public abstract class DSteppable extends DObject implements Stopping
 {
-	public DSteppable() throws RemoteException {
+	public DSteppable(){
 		super();
 	}
 

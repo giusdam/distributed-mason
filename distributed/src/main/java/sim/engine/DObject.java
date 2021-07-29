@@ -8,7 +8,6 @@ package sim.engine;
 
 import java.io.Serializable;
 import java.rmi.RemoteException;
-import java.rmi.server.UnicastRemoteObject;
 import java.util.ArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -62,7 +61,7 @@ public abstract class DObject implements Distinguished, MigratableObject
 	// used to create a unique ID for each promise
 	private int promiseId = 0;
 
-	public DObject() throws RemoteException
+	public DObject()
 	{
 		firstpid = DSimState.getPID(); // called originally to get the FIRST PID
 		localid = nextCounter();
@@ -147,7 +146,9 @@ public abstract class DObject implements Distinguished, MigratableObject
 		return uniquePromiseId;
 	}
 
-	public abstract Serializable fillRemotePromise(Integer tag, Serializable argument) throws RemoteException;
+	public Serializable fillRemotePromise(Integer tag, Serializable argument) throws RemoteException{
+		return null;
+	}
 
 	public ArrayList<RemotePromise> getUnfilledPromises (){
 		return unfilledPromises;

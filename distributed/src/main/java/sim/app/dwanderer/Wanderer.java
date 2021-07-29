@@ -7,7 +7,6 @@
 package sim.app.dwanderer;
 
 import java.io.Serializable;
-import java.rmi.RemoteException;
 import sim.engine.*;
 import sim.util.*;
 import java.util.*;
@@ -27,7 +26,7 @@ public class Wanderer extends DSteppable {
 	// queue of RemotePromise already used
 	ArrayList<String> remotePromiseCompleted = new ArrayList<String>();
 
-	public Wanderer(final Double2D location) throws RemoteException {
+	public Wanderer(final Double2D location) {
 		this.loc = location;
 	}
 
