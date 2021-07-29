@@ -1,0 +1,37 @@
+mason/target/
+contrib/geomason/target/
+*.class
+*.aux
+*.idx
+*.log
+*.out
+*.toc
+*.DS_Store
+*.project
+*.classpath
+*.settings
+# Eclipse
+.classpath
+.project
+.settings/
+# Intellij
+.idea/
+*.iml
+*.iws
+# Mac
+.DS_Store
+# Maven
+log/
+target/
+geomason/repository/jars
+geomason/repository/edu
+contrib/geomason/repository/edu
+contrib/geomason/repository/jars/dadaabData.jar
+contrib/geomason/repository/jars/ebolaData.jar
+contrib/geomason/repository/jars/hotspotsData.jar
+contrib/geomason/repository/jars/refugeeData.jar
+contrib/geomason/repository/jars/swiselib.jar
+kiberaData.jar
+mason/bin
+contrib/distributed-geomason/docs
+contrib/distributed-geomason/jar
