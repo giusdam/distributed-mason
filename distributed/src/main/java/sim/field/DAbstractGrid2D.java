@@ -2,6 +2,7 @@ package sim.field;
 
 import sim.engine.DSimState;
 import sim.field.grid.*;
+
 import sim.util.*;
 
 /**

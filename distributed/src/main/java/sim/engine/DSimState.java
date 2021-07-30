@@ -77,15 +77,15 @@ public class DSimState extends SimState
 	// Flag to understand if the registry is enabled
 	public static boolean withRegistry;
 
+
 	// The number of steps between load balances
 	protected int balanceInterval = 100;
 	// The current balance level FIXME: This looks primitive, and also requires that
 	// be properly in sync
 	int balancerLevel;
-
 	// Queue of RemotePromise to fill
 	static ArrayList<DObject> globalRemotePromises = new ArrayList<>();
-	
+		
 	// Queue of RemotePromise to filled and to unregister
 	static ArrayList<RemotePromise> filledPromises = new ArrayList<>();
 
@@ -280,7 +280,7 @@ public class DSimState extends SimState
 				}
 				globalRemotePromises.clear();
 			}
-	
+			
 			// Sync all the Remove and Add queues for RMI
 			syncRemoveAndAdd();
 			
@@ -290,6 +290,7 @@ public class DSimState extends SimState
 			{
 				// All nodes have finished the synchronization and can unregister exported objects.
 				MPI.COMM_WORLD.barrier();
+
 				// After the synchronization we can unregister migrated object!
 				// remove exported-migrated object from local node
 				for (String mo : DRegistry.getInstance().getMigratedNames())
@@ -312,8 +313,11 @@ public class DSimState extends SimState
 			throw new RuntimeException(e);
 		}
 
+
 		for (final PayloadWrapper payloadWrapper : transporter.objectQueue)
 		{
+
+			// filling the remotePromise of migrated object
 			DObject mobj = null;
 
 			if(payloadWrapper.payload instanceof DistributedIterativeRepeat)
@@ -350,6 +354,7 @@ public class DSimState extends SimState
 						}
 					}
 				}
+
 			/*
 			 * Assumptions about what is to be added to the field using addToField method rely on the fact that the wrapper
 			 * classes are not directly used By the modelers
@@ -375,8 +380,8 @@ public class DSimState extends SimState
 				// "the time provided (-1.0000000000000002) is < EPOCH (0.0)"
 
 				Stopping stopping = iterativeRepeat.getSteppable();
-				stopping.setStoppable(schedule.scheduleRepeating(stopping, iterativeRepeat.getOrdering(), iterativeRepeat.interval));
-
+				stopping.setStoppable(
+						schedule.scheduleRepeating(stopping, iterativeRepeat.getOrdering(), iterativeRepeat.interval));
 			}
 			else if (payloadWrapper.payload instanceof AgentWrapper)
 			{
@@ -422,7 +427,13 @@ public class DSimState extends SimState
 
 				try
 				{
-					transporter.sync();	
+
+
+					transporter.sync();
+					
+
+					
+					
 				}
 				catch (ClassNotFoundException | IOException e1)
 				{
@@ -450,7 +461,13 @@ public class DSimState extends SimState
 						// add the object to the field
 						fieldList.get(payloadWrapper.fieldIndex).addPayload(payloadWrapper);
 						//verify it was added to the correct location!
+						
+
 					}
+					
+					
+
+					
 
 					// DistributedIterativeRepeat
 					if (payloadWrapper.payload instanceof DistributedIterativeRepeat)
@@ -494,8 +511,12 @@ public class DSimState extends SimState
 						else
 							schedule.scheduleOnce(agentWrapper.time, agentWrapper.ordering, agentWrapper.agent);
 					}
+					
+
 				}
 
+
+				
 				// Wait that all nodes have registered their new objects in the distributed registry.
 				try
 				{
@@ -535,6 +556,8 @@ public class DSimState extends SimState
 				throw new RuntimeException(e);
 			}
 		}
+		
+
 	}
 
 	/*
@@ -544,6 +567,8 @@ public class DSimState extends SimState
 	 */
 	void balancePartitions(int level) throws MPIException
 	{
+		
+
 		int x = countTotalAgents(fieldList.get(0));
 
 		if (this.getPID() == 0) {
@@ -569,6 +594,7 @@ public class DSimState extends SimState
 		for (Synchronizable field : fieldList)
 		{
 
+			
 			ArrayList<Object> migratedAgents = new ArrayList<>();
 			HaloGrid2D haloGrid2D = (HaloGrid2D) field;
 
@@ -687,12 +713,21 @@ public class DSimState extends SimState
 							for (int i = ((ArrayList<Serializable>) a_list).size() - 1; i >= 0; i--)
 							{
 								Serializable a = ((ArrayList<Serializable>) a_list).get(i);
-						
+								
+								
+								
+
+								
+
+								
+								
 								// if a is stoppable
 								if (a != null && a instanceof Stopping && !migratedAgents.contains(a)
 										&& old_partition.contains(p) && !partition.getLocalBounds().contains(p))
 								{
 									DSteppable stopping = ((DSteppable) a);
+									
+									
 
 									// stop and migrate
 									if (stopping.getStoppable() instanceof DistributedTentativeStep)
@@ -724,6 +759,11 @@ public class DSimState extends SimState
 									// haloGrid2D.removeLocal(p, stopping.ID());
 									
 									st.removeObject(p, stopping.ID());
+									
+						
+									
+
+
 
 								}
 
@@ -742,10 +782,18 @@ public class DSimState extends SimState
 						}
 					}
 				}
+				
+				//((HaloGrid2D) field).loc_disagree_all_points("bp3");
+
+
 			}
 		}
 		MPI.COMM_WORLD.barrier();
 		Timing.stop(Timing.LB_OVERHEAD);
+		
+		//System.out.println("done balancing");
+
+
 	}
 
 	static void initRemoteLogger(final String loggerName, final String logServAddr, final int logServPort)
@@ -1079,6 +1127,16 @@ public class DSimState extends SimState
 
 			// partition.getCommunicator().gather(g, 1, MPI.DOUBLE, gg, 1, MPI.DOUBLE, 0); // fix type!
 			ArrayList<Object[]> gg = MPIUtil.gather(partition, g, 0);
+			
+			if (this.getPID() == 0) {
+                for (int i=0; i<gg.size(); i++) {
+                	System.out.println(i+"---");
+                	for (Object ggg: gg.get(i)){
+                		System.out.println(ggg);
+                	}
+                }
+			}
+
 
 			return gg;
 		}
@@ -1101,7 +1159,8 @@ public class DSimState extends SimState
 		try
 		{
 			// partition.getCommunicator().bcast(global, 1, MPI.DOUBLE, 0);
-			MPIUtil.bcast(partition, global, 0);
+			global = MPIUtil.bcast(partition.getCommunicator(), global, 0);
+			System.out.println("gl: "+global);
 			setPartitionGlobals(global);
 		}
 		catch (Exception e)
@@ -1187,13 +1246,19 @@ public class DSimState extends SimState
 					if (a_list != null)
 					{
 						count = count + ((ArrayList<Serializable>) a_list).size();
-					}	
+					}
+					
+			
+			
+			
 				}
 			}
 		}
+		
 		return count;
+		
 	}
-
+	
 	/*
 	public static void loc_disagree(Int2D p, DHeatBug h, Partition p2, String s)
 	{

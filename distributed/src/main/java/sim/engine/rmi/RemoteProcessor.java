@@ -5,6 +5,7 @@ import java.rmi.server.*;
 import java.util.*;
 import java.util.concurrent.locks.ReentrantLock;
 
+import sim.engine.transport.*;
 import sim.display.*;
 import sim.field.storage.*;
 import sim.util.*;
