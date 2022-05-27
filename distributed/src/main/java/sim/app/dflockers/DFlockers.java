@@ -10,17 +10,18 @@ import java.io.File;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
+
 import sim.engine.DSimState;
 import sim.field.continuous.DContinuous2D;
+import sim.util.Double2D;
 import sim.util.Timing;
-import sim.util.*;
 
 public class DFlockers extends DSimState
 {
 	private static final long serialVersionUID = 1;
 
-	public final static int width = 600;
-	public final static int height = 600;
+	public final static int width = 100;
+	public final static int height = 100;
 	public final static int numFlockers = 1000;
 	public final static double cohesion = 1.0;
 	public final static double avoidance = 1.0;
@@ -28,8 +29,9 @@ public class DFlockers extends DSimState
 	public final static double consistency = 1.0;
 	public final static double momentum = 1.0;
 	public final static double deadFlockerProbability = 0;
-	public final static int neighborhood = 6; // aoi
+	public final static int neighborhood = 2; // aoi
 	public final static double jump = 0.7; // how far do we move in a time step?
+	
 
 	public final DContinuous2D<DFlocker> flockers;
 
@@ -40,9 +42,25 @@ public class DFlockers extends DSimState
 	/** Creates a Flockers simulation with the given random number seed. */
 	public DFlockers(final long seed)
 	{
-		super(seed, DFlockers.width, DFlockers.height, DFlockers.neighborhood);
+		super(seed, DFlockers.width, DFlockers.height, DFlockers.neighborhood, true);
 
 		flockers = new DContinuous2D<>((int) (DFlockers.neighborhood / 1.5), this);
+		
+		//this.recordStats = true;
+		//this.recordStats = false;
+		//this.startStats(0);
+		//this.startStats(1);
+
+
+	}
+	
+	@Override
+	public void preSchedule()
+	{
+		// TODO Auto-generated method stub
+		super.preSchedule(); // do not forget this line
+
+		//System.out.println("Size of agents in proc " + getPID() + " " + "size in storage: " + flockers.getAllAgentsInStorage().size());
 
 	}
 
@@ -74,11 +92,14 @@ public class DFlockers extends DSimState
 		for (Object p : agents)
 		{
 			DFlocker a = (DFlocker) p;
-			if (partition.getLocalBounds().contains(a.loc))
+			if (getPartition().getLocalBounds().contains(a.loc)) {
 				flockers.addAgent(a.loc, a, 0, 0, 1);
+			}
 		}
 
 	}
+	
+
 
 	public static void main(final String[] args)
 	{

@@ -2,16 +2,12 @@ package sim.field.storage;
 
 import java.io.Serializable;
 import java.util.ArrayList;
-import java.util.function.IntFunction;
 
-import sim.app.dheatbugs.DHeatBug;
-import sim.app.dheatbugs.DHeatBugs;
 import sim.engine.DObject;
-import sim.engine.DSimState;
-import sim.engine.DSteppable;
-import sim.engine.Steppable;
-import sim.engine.Stoppable;
-import sim.util.*;
+import sim.util.Int2D;
+import sim.util.IntRect2D;
+import sim.util.MPIParam;
+import sim.util.Number2D;
 
 /**
  * internal local storage for distributed grids.
@@ -64,13 +60,8 @@ public class DenseGridStorage<T extends DObject> extends GridStorage<T>
 
 		for (final IntRect2D rect : mp.rects)
 		{
-			//System.out.println("packing "+rect);
 			for (final Int2D p : rect.getPointList())
 			{
-				
-				//local_p = toLocalPoint(p);
-
-				
 				objs[curr++] = stor[getFlatIndex(p)];
 			}
 		}
@@ -86,56 +77,51 @@ public class DenseGridStorage<T extends DObject> extends GridStorage<T>
 
 		for (final IntRect2D rect : mp.rects)
 		{
-			//System.out.println("unpacking "+rect);
 			for (final Int2D p : rect.getPointList())
 			{
-				
-
-				
-
 				stor[getFlatIndex(p)] = objs[curr++];
-				
-				/*
-				stor[getFlatIndex(p)] = objs[curr];
-				
-				if (stor[getFlatIndex(p)] != null) {
-					for (T t : stor[getFlatIndex(p)]) {
-						if (t instanceof Stoppable) {
-							((Stoppable)t).stop();
-						}
-					}
-				}
-				curr++;
-				*/
-				
-				
-				
-
 			}
 		}
-
-		//return curr;
 	}
+
+	public ArrayList<T> get(Int2D p)
+	{
+		return storage[getFlatIndex((Int2D) p)];
+	}
+
+	public void set(Int2D p, ArrayList<T> t)
+	{
+		storage[getFlatIndex((Int2D) p)] = t;
+	}
+
+	public ArrayList<T> get(int x, int y)
+	{
+		return storage[getFlatIndex(x, y)];
+	}
+
+	public void set(int x, int y, ArrayList<T> t)
+	{
+		storage[getFlatIndex(x, y)] = t;
+	}
+
 
 
 
 	///// GRIDSTORAGE GUNK
 
-	public void addObject(NumberND p, T t)
+	public void addObject(Number2D p, T t)
 	{
 		//System.out.println("adding obj "+t+" to"+p);
 		
-		Int2D local_p = toLocalPoint((Int2D) p);
+		Int2D localP = toLocalPoint((Int2D) p);
 		final ArrayList<T>[] array = storage;
-		final int idx = getFlatIndex(local_p);
+		final int idx = getFlatIndex(localP);
 
 		if (array[idx] == null)
 			array[idx] = new ArrayList<T>();
 
 		array[idx].add(t);
-		
-		//DSimState.loc_disagree((Int2D)p, (DHeatBug) t, null, "addObject");
-		
+				
 		if (!getAllObjects(p).contains(t))
 		{
 			System.out.println("not added to correct location");
@@ -144,10 +130,10 @@ public class DenseGridStorage<T extends DObject> extends GridStorage<T>
 		
 	}
 
-	public T getObject(NumberND p, long id)
+	public T getObject(Number2D p, long id)
 	{
-		Int2D local_p = toLocalPoint((Int2D) p);
-		ArrayList<T> ts = storage[getFlatIndex(local_p)];
+		Int2D localP = toLocalPoint((Int2D) p);
+		ArrayList<T> ts = storage[getFlatIndex(localP)];
 		if (ts != null)
 			{
 			for (T t : ts)
@@ -157,10 +143,10 @@ public class DenseGridStorage<T extends DObject> extends GridStorage<T>
 		return null;
 	}
 
-	public ArrayList<T> getAllObjects(NumberND p)
+	public ArrayList<T> getAllObjects(Number2D p)
 	{
-		Int2D local_p = toLocalPoint((Int2D) p);
-		return storage[getFlatIndex(local_p)];
+		Int2D localP = toLocalPoint((Int2D) p);
+		return storage[getFlatIndex(localP)];
 	}
 
 	//Does this need to be adapted to convert to local???
@@ -172,21 +158,11 @@ public class DenseGridStorage<T extends DObject> extends GridStorage<T>
 		return list.remove(top) != null;
 		}
 
-/*
-	boolean removeFast(ArrayList<T> list, T t)
-		{
-		int pos = list.indexOf(t);
-		if (pos >= 0)
-			return removeFast(list, pos);
-		else return (pos >= 0);
-		}
-*/
-
-	public boolean removeObject(NumberND p, long id)
+	public boolean removeObject(Number2D p, long id)
 	{
-		Int2D local_p = toLocalPoint((Int2D) p);
+		Int2D localP = toLocalPoint((Int2D) p);
 		final ArrayList<T>[] array = storage;
-		final int idx = getFlatIndex(local_p);
+		final int idx = getFlatIndex(localP);
 		boolean result = false;
 
 		if (array[idx] != null)
@@ -206,11 +182,11 @@ public class DenseGridStorage<T extends DObject> extends GridStorage<T>
 		return result;
 	}
 
-	public void clear(NumberND p)
+	public void clear(Number2D p)
 	{
-		Int2D local_p = toLocalPoint((Int2D) p);
+		Int2D localP = toLocalPoint((Int2D) p);
 		final ArrayList<T>[] array = storage;
-		final int idx = getFlatIndex(local_p);
+		final int idx = getFlatIndex(localP);
 
 		if (array[idx] != null)
 		{

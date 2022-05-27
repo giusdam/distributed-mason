@@ -6,7 +6,11 @@
 
 package sim.engine;
 
-/** A simple implementation of Stopping in a Steppable. */
+/** 
+	A simple implementation of Stopping in a Steppable.  All Steppables in
+	Distributed MASON must implement Stopping, and so this provides a convenient
+	object to subclass to do this.
+ */
 
 public abstract class DSteppable extends DObject implements Stopping
 {
@@ -28,4 +32,5 @@ public abstract class DSteppable extends DObject implements Stopping
 		{
 		return stop == null;
 		}
+
 }

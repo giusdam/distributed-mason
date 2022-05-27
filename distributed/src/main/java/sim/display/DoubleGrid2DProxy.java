@@ -1,12 +1,11 @@
 package sim.display;
-import sim.field.grid.*;
-import sim.engine.*;
-import sim.field.storage.*;
-import sim.field.partitioning.*;
-import java.rmi.*;
-import java.util.ArrayList;
+import java.rmi.NotBoundException;
+import java.rmi.RemoteException;
 
-import sim.util.*;
+import sim.field.grid.DoubleGrid2D;
+import sim.field.storage.DoubleGridStorage;
+import sim.util.Int2D;
+import sim.util.IntRect2D;
 
 public class DoubleGrid2DProxy extends DoubleGrid2D implements UpdatableProxy
 	{
@@ -82,7 +81,7 @@ public class DoubleGrid2DProxy extends DoubleGrid2D implements UpdatableProxy
 			//int halo_size = vp1.getAOI();
 		    IntRect2D partBound = vp1.getStorageBounds();
 		    
-		    System.out.println("partBound "+partBound);
+		    System.out.println("double partBound "+partBound);
 		    
 			//remove halo bounds using bounds.ul offset, assumption is offset from 0,0 is halo size
 		    

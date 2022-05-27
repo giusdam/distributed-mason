@@ -1,10 +1,11 @@
 package sim.display;
-import sim.field.grid.*;
-import sim.engine.*;
-import sim.field.storage.*;
-import sim.field.partitioning.*;
-import java.rmi.*;
-import sim.util.*;
+import java.rmi.NotBoundException;
+import java.rmi.RemoteException;
+
+import sim.field.grid.ObjectGrid2D;
+import sim.field.storage.ObjectGridStorage;
+import sim.util.Int2D;
+import sim.util.IntRect2D;
 
 public class ObjectGrid2DProxy extends ObjectGrid2D implements UpdatableProxy
 	{
@@ -87,19 +88,21 @@ public class ObjectGrid2DProxy extends ObjectGrid2D implements UpdatableProxy
             
 			// load storage, add this to field!
             ObjectGridStorage storage = (ObjectGridStorage)(stateProxy.storage(proxyIndex));
-			Object[] data = (Object[])(storage.storage);	
+			//Object[] data = (Object[])(storage.storage);	
+			Object[] data = (Object[])(storage.storage.getArray());	
+
 			for(int x = partition_width_low_ind; x < partition_width_high_ind; x++)
 				{
 				
 				
-				Object[] fieldx = field[x];
+				Object[] fieldx = field[x - fullBounds_offset.getX()];
 				for(int y = partition_height_low_ind; y < partition_height_high_ind; y++)
 					{
 					
 
 					
 					Int2D local_p = storage.toLocalPoint(new Int2D(x, y)); //convert to local storage to access partiton storage correctly
-					fieldx[y] = data[local_p.x * partBound.getHeight() + local_p.y];
+					fieldx[y - fullBounds_offset.getY()] = data[local_p.x * partBound.getHeight() + local_p.y];
 
 					}
 				}

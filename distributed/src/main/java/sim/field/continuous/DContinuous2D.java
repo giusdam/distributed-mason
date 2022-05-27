@@ -1,26 +1,23 @@
 package sim.field.continuous;
 
-import java.io.Serializable;
-
-import java.rmi.*;
+import java.rmi.RemoteException;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
 
+import sim.app.dwanderer.Wanderer;
 import sim.engine.DObject;
 import sim.engine.DSimState;
 import sim.engine.DistributedIterativeRepeat;
 import sim.engine.DistributedTentativeStep;
+import sim.engine.Promise;
+import sim.engine.Promised;
 import sim.engine.Stoppable;
 import sim.engine.Stopping;
 import sim.field.DAbstractGrid2D;
 import sim.field.HaloGrid2D;
-import sim.app.dflockers.DFlocker;
-import sim.engine.*;
-import sim.field.partitioning.Partition;
 import sim.field.storage.ContinuousStorage;
-import sim.util.*;
+import sim.util.Double2D;
+import sim.util.Int2D;
 
 /**
  * A continuous field that contains lists of objects of type T. Analogous to
@@ -357,6 +354,7 @@ public class DContinuous2D<T extends DObject> extends DAbstractGrid2D
 			}
 		else
 			{
+			System.out.println("remote?");
 			halo.addAgentToRemote(p, agent, ordering, time, interval);
 			}
 		}
@@ -439,12 +437,16 @@ public class DContinuous2D<T extends DObject> extends DAbstractGrid2D
 				Stoppable stop = a.getStoppable();
 				if (stop == null)
 					{
+
 					// we're done, just move it but don't bother rescheduling
 					removeLocal(agent);
 					halo.addToRemote(to, agent);
 					}
 				else if (stop instanceof DistributedTentativeStep)
 					{
+					
+                    //System.out.println("xy "+((DParticle)agent).position+" from"+getObjectLocationLocal(agent.ID())+" to "+to);
+                    
 					DistributedTentativeStep _stop = (DistributedTentativeStep)stop;
 					double time = _stop.getTime();
 					int ordering = _stop.getOrdering();
@@ -456,13 +458,20 @@ public class DContinuous2D<T extends DObject> extends DAbstractGrid2D
 						}
 					else	// this could theoretically happen because TentativeStep doesn't null out its agent after step()
 						{
+						
+                        //System.out.println("addToRemote");
+                        //System.exit(-1);
 						// we're done, just move it
 						removeLocal(agent);
-						halo.addToRemote(to, agent);
+						//halo.addToRemote(to, agent); 
+						halo.addAgentToRemote(to, agent, ordering, time); //should we use this one?  more agent friendly?
+
 						}
 					}
 				else if (stop instanceof DistributedIterativeRepeat)
 					{
+					
+
 					
 					DistributedIterativeRepeat _stop = (DistributedIterativeRepeat)stop;
 					double time = _stop.getTime();
@@ -482,6 +491,8 @@ public class DContinuous2D<T extends DObject> extends DAbstractGrid2D
 						time = time + interval;					// advance to next
 						}
 					removeLocal(agent);
+					
+        
 					halo.addAgentToRemote(to, agent, ordering, time, interval);
 					
 					}
@@ -493,9 +504,9 @@ public class DContinuous2D<T extends DObject> extends DAbstractGrid2D
 			}
 		else
 			{
-			/*
+			
 	    	System.out.println("agent: " + agent);
-            System.out.println("agent loc from"+((DFlocker)agent).loc);
+            System.out.println("agent loc from"+((Wanderer)agent).loc);
             System.out.println("agent to"+to);
 
 	    	System.out.println("map: " + this.getStorage().getLocations());
@@ -505,7 +516,7 @@ public class DContinuous2D<T extends DObject> extends DAbstractGrid2D
 	    	System.out.println("moveAgent getLocalBounds: " + getHaloGrid().getLocalBounds());
 	    	
 	    	System.exit(-1);
-	    	*/
+	    	
 			throw new RuntimeException("Cannot move agent " + agent + " to " + to + " because agent is not local.");
 			}
 		}
@@ -778,6 +789,8 @@ public class DContinuous2D<T extends DObject> extends DAbstractGrid2D
     	int minY = min.y;
     	int maxY = max.y;
     
+		// System.out.println("Position: " + position.toString());
+		
 		// for non-toroidal, it is easier to do the inclusive for-loops
 		for(int x = minX; x<= maxX; x++)
 			for(int y = minY ; y <= maxY; y++)
@@ -793,10 +806,15 @@ public class DContinuous2D<T extends DObject> extends DAbstractGrid2D
         return result;
         }
     
-    public ArrayList<T> getAllAgentsInStorage(){
+    public ArrayList<T> getAllAgentsInStorage()
+    {
     	ArrayList<T> allAgents = new ArrayList<T>();
-    	for (int i=0; i<this.storage.storage.length; i++) {
-    		for (T t :this.storage.storage[i].values()) {
+		// System.out.println("storage len: " + this.storage.storage.length);
+    	for (int i=0; i<this.storage.storage.length; i++) 
+    	{
+			
+    		for (T t :this.storage.storage[i].values()) 
+    		{
     			allAgents.add(t);
     		}
     	}

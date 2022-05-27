@@ -6,6 +6,8 @@
 
 package sim.app.dflockers;
 
+import java.rmi.Remote;
+import java.util.ArrayList;
 import java.util.List;
 
 import ec.util.MersenneTwisterFast;
@@ -13,8 +15,7 @@ import sim.engine.DSteppable;
 import sim.engine.SimState;
 import sim.field.continuous.DContinuous2D;
 import sim.portrayal.Oriented2D;
-import sim.util.*;
-import java.util.*;
+import sim.util.Double2D;
 
 public class DFlocker extends DSteppable implements Oriented2D
 {
@@ -160,6 +161,8 @@ public class DFlocker extends DSteppable implements Oriented2D
 
     public ArrayList<DFlocker> getNeighbors(DFlockers dFlockers)
         {
+		if (loc.x < 0 || loc.x > dFlockers.flockers.getWidth() || loc.y < 0 || loc.y > dFlockers.flockers.getHeight())
+			System.out.println("Flocker location to search for neighbors is " + loc);
         return dFlockers.flockers.getNeighborsExactlyWithinDistance(loc, (double)DFlockers.neighborhood);
         }
 
@@ -191,7 +194,7 @@ public class DFlocker extends DSteppable implements Oriented2D
 		ArrayList<DFlocker> b = getNeighbors(dFlockers);
 		
 		
-		
+		System.out.println("Flocker in " + this.loc + " has " + b.size() + " neighbors");
 		
 		
 		
@@ -231,6 +234,9 @@ public class DFlocker extends DSteppable implements Oriented2D
 //		}
 //		// <<<<<<<<<<<<<<<<
 		
+		dFlockers.addStat(loc.getX(), 0); //testing stats
+		dFlockers.addStat(loc.getY(), 1); //testing stats
+		
 		try
 		{
 			dFlockers.flockers.moveAgent(loc, this);
@@ -241,7 +247,13 @@ public class DFlocker extends DSteppable implements Oriented2D
 					+ dFlockers.getPartition().getPID());
 			throw new RuntimeException(e);
 		}
+		
+
+
+
+
 	}
+	
 
 	public String toString()
 	{

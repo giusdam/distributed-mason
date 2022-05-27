@@ -1,10 +1,11 @@
 package sim.display;
-import sim.field.grid.*;
-import sim.engine.*;
-import sim.field.storage.*;
-import sim.field.partitioning.*;
-import java.rmi.*;
-import sim.util.*;
+import java.rmi.NotBoundException;
+import java.rmi.RemoteException;
+
+import sim.field.grid.IntGrid2D;
+import sim.field.storage.IntGridStorage;
+import sim.util.Int2D;
+import sim.util.IntRect2D;
 
 public class IntGrid2DProxy extends IntGrid2D implements UpdatableProxy
 	{
@@ -77,7 +78,8 @@ public class IntGrid2DProxy extends IntGrid2D implements UpdatableProxy
 			//int halo_size = vp1.getAOI();
 		    IntRect2D partBound = vp1.getStorageBounds();
 		    
-		    
+		    System.out.println("int partBound "+partBound);
+
 		    
 			//remove halo bounds using bounds.ul offset, assumption is offset from 0,0 is halo size
 		    
@@ -86,22 +88,23 @@ public class IntGrid2DProxy extends IntGrid2D implements UpdatableProxy
             int partition_height_low_ind =  partBound.ul().getY()+halo_size;  //partition bounds
             int partition_height_high_ind =  partBound.br().getY()-halo_size;   //partition bounds 
 
+            System.out.println(partBound);
             
 			// load storage, add this to field!
 			IntGridStorage storage = (IntGridStorage)(stateProxy.storage(proxyIndex));
 			int[] data = (int[])(storage.storage);
 			for(int x = partition_width_low_ind; x < partition_width_high_ind; x++)
 				{
+
+				int[] fieldx = field[x - fullBounds_offset.getX()]; //oob in dantsforage?
 				
-				
-				int[] fieldx = field[x];
 				for(int y = partition_height_low_ind; y < partition_height_high_ind; y++)
 					{
 					
 
 					
 					Int2D local_p = storage.toLocalPoint(new Int2D(x, y)); //convert to local storage to access partition storage correctly
-					fieldx[y] = data[local_p.x * partBound.getHeight() + local_p.y];
+					fieldx[y - fullBounds_offset.getY()] = data[local_p.x * partBound.getHeight() + local_p.y];
 
 					}
 				}

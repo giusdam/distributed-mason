@@ -6,14 +6,17 @@
 
 package sim.app.dantsforage;
 
-import sim.portrayal.*;
-import sim.util.*;
-import sim.engine.*;
-import java.awt.*;
+import java.awt.Color;
+import java.awt.Graphics2D;
 import java.rmi.Remote;
 import java.rmi.RemoteException;
 
-public class DAnt extends DSteppable implements Remote
+import sim.engine.DSteppable;
+import sim.engine.SimState;
+import sim.portrayal.DrawInfo2D;
+import sim.util.Int2D;
+
+public class DAnt extends DSteppable
 {
 	private static final long serialVersionUID = 1;
 
@@ -156,18 +159,29 @@ public class DAnt extends DSteppable implements Remote
 					max_y = ym;
 				}
 			}
-			af.buggrid.add(new Int2D(max_x, max_y), this);
+			
+            int old_x = x;
+            int old_y = y;
+
+			last = new Int2D(x, y);
+
 			x = max_x;
 			y = max_y;
-			last = new Int2D(x, y);
+			
+			
+			
 			if (af.sites.get(new Int2D(max_x, max_y)).getInt() == DAntsForage.HOME) // reward me next time! And change my status
 			{
 				reward = af.reward;
 				hasFoodItem = !hasFoodItem;
 			}
+			
+			af.buggrid.moveAgent(new Int2D(old_x, old_y), new Int2D(max_x, max_y), this);
+
 		}
 		else
 		{
+			
 			double max = DAntsForage.IMPOSSIBLY_BAD_PHEROMONE;
 			int max_x = x;
 			int max_y = y;
@@ -175,6 +189,7 @@ public class DAnt extends DSteppable implements Remote
 			for (int dx = -1; dx < 2; dx++)
 				for (int dy = -1; dy < 2; dy++)
 				{
+
 					int _x = dx + x;
 					int _y = dy + y;
 					if ((dx == 0 && dy == 0) ||
@@ -183,6 +198,8 @@ public class DAnt extends DSteppable implements Remote
 							af.obstacles.get(new Int2D(_x, _y)).getInt() == 1)
 						continue; // nothing to see here
 					double m = af.toFoodGrid.get(new Int2D(_x, _y)).getDouble();
+					
+                    if (m > max)
 					{
 						count = 2;
 					}
@@ -196,10 +213,14 @@ public class DAnt extends DSteppable implements Remote
 						max_y = _y;
 					}
 				}
+			
+
+			
 			if (max == 0 && last != null) // nowhere to go! Maybe go straight
 			{
 				if (state.random.nextBoolean(af.momentumProbability))
 				{
+					System.out.println("momentum direction: "+(x - last.x)+" "+(y - last.y));
 					int xm = x + (x - last.x);
 					int ym = y + (y - last.y);
 					if (xm >= 0 && xm < DAntsForage.GRID_WIDTH && ym >= 0 && ym < DAntsForage.GRID_HEIGHT
@@ -223,13 +244,26 @@ public class DAnt extends DSteppable implements Remote
 					max_y = ym;
 				}
 			}
-			af.buggrid.add(new Int2D(max_x, max_y), this);
-			last = new Int2D(max_x, max_y);
+			
+            int old_x = x;
+            int old_y = y;
+
+			
+			//af.buggrid.add(new Int2D(max_x, max_y), this);
+			last = new Int2D(old_x, old_y);
+			x = max_x;
+			y = max_y;			
+			
+
 			if (af.sites.get(new Int2D(max_x, max_y)).getInt() == DAntsForage.FOOD) // reward me next time! And change my status
 			{
 				reward = af.reward;
 				hasFoodItem = !hasFoodItem;
 			}
+			
+			//System.out.println("Ant : from "+new Int2D(old_x,old_y)+" to "+new Int2D(max_x, max_y));
+			af.buggrid.moveAgent(new Int2D(old_x,old_y), new Int2D(max_x, max_y), this); //this needs to be last, otherwise rest of code may not execute if moving partitions
+
 		}
 	}
 
@@ -238,7 +272,10 @@ public class DAnt extends DSteppable implements Remote
 		try
 		{
 		depositPheromone(state);
+		
+		
 		act(state);
+		
 		}
 		catch (Exception e)
 		{

@@ -1,8 +1,11 @@
 package sim.field.partitioning;
 
-import java.awt.print.Printable;
 import java.util.ArrayList;
-import sim.util.*;
+
+import sim.util.Double2D;
+import sim.util.Int2D;
+import sim.util.IntRect2D;
+import sim.util.Number2D;
 
 // TODO Currently all shapes are restricted to IntRect2D - switch to NdRectangle once it is completed
 /**
@@ -126,13 +129,13 @@ public class QuadTreeNode
 	}
 
 	// Get the immediate child node that contains the given point
-	public QuadTreeNode getChildNode(final NumberND p)
+	public QuadTreeNode getChildNode(final Number2D p)
 	{
 		return children.get(toChildIdx(p));
 	}
 
 	// Get the leaf node that contains the given point
-	public QuadTreeNode getLeafNode(final NumberND p)
+	public QuadTreeNode getLeafNode(final Number2D p)
 	{
 		QuadTreeNode curr = this;
 
@@ -178,16 +181,17 @@ public class QuadTreeNode
 		if (isLeaf())
 		{
 			children = new ArrayList<>();
-			for (int i = 0; i < 4; i++)
+
+			for (int i = 0; i < 4 ; i++)
 			{
-				children.add(new QuadTreeNode(getChildShape(i), this));
+				children.add(new QuadTreeNode(getChildShape(i, 4), this));
 			}
 			ret.addAll(children);
 		}
-		else
+		else{
 			for (int i = 0; i < children.size(); i++)
-				children.get(i).reshape(getChildShape(i));
-
+				children.get(i).reshape(getChildShape(i, children.size()));
+		}
 		return ret;
 	}
 
@@ -274,18 +278,18 @@ public class QuadTreeNode
 	protected void reshape(final IntRect2D newShape)
 	{
 		shape = newShape;
+
 		if (isLeaf())
 			return;
 
 		if (!newShape.contains(origin))
 		{
-			// origin = newShape.getCenter();
 			Double2D d = newShape.getCenter();
 			origin = new Int2D((int) Math.floor(d.x), (int) Math.floor(d.y));
 		}
 
 		for (int i = 0; i < children.size(); i++)
-			children.get(i).reshape(getChildShape(i));
+			children.get(i).reshape(getChildShape(i, children.size()));
 	}
 
 	/**
@@ -294,59 +298,79 @@ public class QuadTreeNode
 	 * @param childId
 	 * @return child's shape
 	 */
-	protected IntRect2D getChildShape(final int childId)
-		{
-		final int[] ul = shape.ul().toArray();
-		final int[] br = origin.toArray();
+	protected IntRect2D getChildShape(final int childId, int numChildren) {
+		final int[] ul = shape.ul().toArray(); 
+		//use centroids as br
+		final int[] br = origin.toArray(); 
 		final int[] sbr = shape.br().toArray();
-
-		for (int i = 0; i < 2; i++)
-			if (((childId >> (2 - i - 1)) & 0x1) == 1) // FIXME: what is this?
-				{
-				ul[i] = br[i];
-				br[i] = sbr[i];
+		if (numChildren == 2){ 
+			
+			if (childId == 0){
+				br[1] = this.getShape().br().y;
+			} else {
+				// upperleft.x is same of new centroid.x
+				ul[0] = br[0];
+				// upperleft.y is same of upperleft.y of the parent
+				ul[1] = this.getShape().ul().y;
+				// br is same of bottomright of the parent
+				br[0] = this.getShape().br().x;
+				br[1] = this.getShape().br().y;
+			}
+			
+		} else if (numChildren == 3){
+			if (childId == 0) {
+				br[1] = this.getShape().br().y;
+			
+			} else if (childId == 1) {
+				// upperleft.x is same of new centroid.x
+				ul[0] = br[0];
+				// upperleft.y is same of upperleft.y of the parent
+				ul[1] = this.getShape().ul().y;
+				// br is same of bottomright of the parent
+				br[0] = this.getShape().br().x;	
+			} else {
+				// upperleft.x is same of new centroid.x
+				ul[0] = br[0];
+				// upperleft.y is same of upperleft.y of the parent
+				ul[1] = br[1];
+				// br is same of bottomright of the parent
+				br[0] = this.getShape().br().x;
+				br[1] = this.getShape().br().y;		
+			}
+		} else { // 4 children
+			for (int i = 0; i < 2; i++) {
+				if (((childId >>> (2 - i - 1)) & 0x1) == 1) {
+					ul[i] = br[i];
+					br[i] = sbr[i];
 				}
-
-		return new IntRect2D(new Int2D(ul), new Int2D(br));
+			}
 		}
+		
+		return new IntRect2D(new Int2D(ul), new Int2D(br));
+	}
 
 	/**
 	 * @param p
 	 * @return the index of my immediate child that contains the given point
 	 */
-	protected int toChildIdx(final NumberND p)
+	protected int toChildIdx(final Number2D p)
 	{
 		if (!shape.contains(p))
 			throw new IllegalArgumentException("p " + p + " must be inside the shape " + shape);
-
-		final double[] oc = origin.toArrayAsDouble(), pc = p.toArrayAsDouble();
-
-		int[] mapd = new int[2];
-		for (int i = 0; i < 2; i++)
-		{
-			int map = 1; // 0 or 1
-			if (pc[i] < oc[i])
-			{
-				map = 0;
-			}
-			mapd[i] = map;
-		}
-		int r = 0;
-		for (int i = 0; i < 2; i++)
-		{
-			int x = mapd[i];
-			r = r << 1 | x;
-		}
 		
 		for(int i=0; i<children.size(); i++)
 		{
+			// System.out.println("PID: " + this.processor + " - Child " + i + " has shape" + children.get(i).shape);
 			if(children.get(i).shape.contains(p))
 			{
-				//System.out.println("*************p " + p + " is contained in " + children.get(i)+" "+children.get(i).shape);
-				// System.out.println("*************r " + r);
 				return i;
 			}
 		}
+		
+
+		// System.out.println("\n\n*************Checking p " + p + "\n\n\n\n");
+		// System.out.println("\n\n ---- " + this.toStringAll() + "\n\n\n\"");
+
 		return -1; //error
 	}
 }

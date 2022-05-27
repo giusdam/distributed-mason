@@ -16,9 +16,8 @@ import java.util.Date;
 
 import sim.engine.DSimState;
 import sim.field.continuous.DContinuous2D;
-import sim.field.storage.ContinuousStorage;
+import sim.util.Double2D;
 import sim.util.Timing;
-import sim.util.*;
 
 public class DSimulation extends DSimState
 {
@@ -38,7 +37,7 @@ public class DSimulation extends DSimState
 	/** Creates a Flockers simulation with the given random number seed. */
 	public DSimulation(final long seed)
 	{
-		super(seed, DSimulation.width, DSimulation.height, DSimulation.neighborhood);
+		super(seed, DSimulation.width, DSimulation.height, DSimulation.neighborhood, false);
 
 		// final double[] discretizations = new double[] { DSimulation.neighborhood /
 		// 1.5, DSimulation.neighborhood / 1.5 };
@@ -76,13 +75,13 @@ public class DSimulation extends DSimState
 			e.printStackTrace();
 		}
 
-		for (DAgent f : ((ContinuousStorage<DAgent>) field.getHaloGrid().getStorage())
-				.getObjects(field.getHaloGrid().getStorage().getShape()))
-		{
+		//for (DAgent f : ((ContinuousStorage<DAgent>) field.getHaloGrid().getStorage())
+		//		.getObjects(field.getHaloGrid().getStorage().getShape()))
+		//{
 //			out.println("agent " + f.getId() + " in position " + f.loc + " num neighbours: " + f.neighbours.size() + " neighbours " + f.neighbours);
-			out.println("agent " + f.ID() + " in position " + f.loc + " num neighbours: " + f.neighbours.size()
-					+ " neighbours " + f.neighbours);
-		}
+		//	out.println("agent " + f.ID() + " in position " + f.loc + " num neighbours: " + f.neighbours.size()
+		//			+ " neighbours " + f.neighbours);
+		//}
 
 		out.close();
 		// }

@@ -7,16 +7,16 @@
 package sim.app.dheatbugs;
 
 import java.util.ArrayList;
-
 import java.util.HashMap;
+
 import sim.engine.DSimState;
 import sim.engine.DSteppable;
 import sim.engine.Schedule;
 import sim.engine.SimState;
 import sim.field.grid.DDenseGrid2D;
 import sim.field.grid.DDoubleGrid2D;
+import sim.util.Int2D;
 import sim.util.Interval;
-import sim.util.*;
 
 public class DHeatBugs extends DSimState
 {
@@ -57,7 +57,7 @@ public class DHeatBugs extends DSimState
 
 	public DHeatBugs(final long seed, final int width, final int height, final int count, final int aoi)
 	{
-		super(seed, width, height, aoi);
+		super(seed, width, height, aoi, true);
 		gridWidth = width;
 		gridHeight = height;
 		bugCount = count;
@@ -276,7 +276,7 @@ public class DHeatBugs extends DSimState
 		{
 			for (DHeatBug a : agents.get(p))
 			{
-				if (partition.getLocalBounds().contains(p))
+				if (getPartition().getLocalBounds().contains(p))
 				{
 					bugs.addAgent(p, a, 0, 0, 1);
 					System.out.println("start : " + a+" "+a.loc_x+" "+a.loc_y+p);

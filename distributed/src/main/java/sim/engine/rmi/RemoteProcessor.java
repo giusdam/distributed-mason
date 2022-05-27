@@ -1,46 +1,64 @@
 package sim.engine.rmi;
 
-import java.rmi.*;
-import java.rmi.server.*;
-import java.util.*;
+import java.rmi.NotBoundException;
+
+
+
+import java.rmi.RemoteException;
+import java.rmi.server.UnicastRemoteObject;
+import java.util.ArrayList;
 import java.util.concurrent.locks.ReentrantLock;
 
-import sim.engine.transport.*;
-import sim.display.*;
-import sim.field.storage.*;
-import sim.util.*;
-import sim.engine.*;
+import sim.display.Stat;
+import sim.display.VisualizationProcessor;
+import sim.engine.DSimState;
+import sim.field.storage.GridStorage;
+import sim.engine.DistinguishedRegistry;
+import sim.util.IntRect2D;
+import sim.util.Properties;
+import sim.util.SimpleProperties;
+
+/***
+	REMOTE PROCESSOR
+	
+	<p>
+	This RMI object, which is registered with the RMI Registry, is the top-level RMI access
+	object for a given processor.  Remote visualization tools should lock() on this object
+	before accessing elements from it, then unlock() when they are finished.  This guarantees
+	that the object is in-between steps and the visualization tool has atomic control over it.
+*/
 
 public class RemoteProcessor extends UnicastRemoteObject implements VisualizationProcessor
 {
-	// public class RemoteProcessor implements VisualizationProcessor {
 	private static final long serialVersionUID = 1L;
 
-	DSimState dSimState;
+	DSimState state;
+	Properties prop;
+    //PropertiesRequester propRequester;
 	ReentrantLock lock = new ReentrantLock(true); // Fair lock
-	public static final String NAME_PREFIX = "processorPId: ";
+	ReentrantLock partitionLock = new ReentrantLock(true); // Fair lock
 	public final String processorName;
 	static ArrayList<VisualizationProcessor> processorCache = new ArrayList<>();
 
 	/**
 	 * Creates a processor and registers it to the RMI Registry
 	 * 
-	 * @param dSimState
+	 * @param state
 	 * @throws RemoteException
 	 */
-	public RemoteProcessor(DSimState dSimState) throws RemoteException
+	public RemoteProcessor(DSimState state) throws RemoteException
 	{
 		// super(DSimState.getPID());
 		// TODO: What constructor to use for UnicastRemoteObject?
 		super();
 
-		this.dSimState = dSimState;
+		this.state = state;
 		int pid = DSimState.getPID();
 		processorName = RemoteProcessor.getProcessorName(pid);
 
 		try
 		{
-			if (!DRegistry.getInstance().registerObject(processorName, this))
+			if (!DistinguishedRegistry.getInstance().registerObject(processorName, this))
 				throw new RuntimeException("Failed to register processor: " + processorName);
 		}
 		catch (RemoteException e)
@@ -50,54 +68,72 @@ public class RemoteProcessor extends UnicastRemoteObject implements Visualizatio
 		}
 	}
 
+	/** ONLY the root processor listens to this lock */
 	public void lock() throws RemoteException
 	{
 		lock.lock();
 	}
 
+	/** ONLY the root processor listens to this lock */
 	public void unlock() throws RemoteException
 	{
+	if (lock.isHeldByCurrentThread()) 
+		{
 		lock.unlock();
+		}
+	}
+
+	public void lockPartition() throws RemoteException
+	{
+		partitionLock.lock();
+	}
+
+	public void unlockPartition() throws RemoteException
+	{
+	if (partitionLock.isHeldByCurrentThread()) 
+		{
+			partitionLock.unlock();
+		}
 	}
 
 	public IntRect2D getStorageBounds() throws RemoteException
 	{
-		return dSimState.getPartition().getHaloBounds();
+		return state.getPartition().getHaloBounds();
 	}
 
 	public GridStorage getStorage(int fieldId) throws RemoteException
 	{
-		return dSimState.getFieldList().get(fieldId).getStorage();
+		return state.getFieldList().get(fieldId).getStorage();
 	}
 
-	public TransportRMIInterface getTransportRMI(int fieldId) throws RemoteException
+	public GridRMI getGrid(int fieldId) throws RemoteException
 	{
-		return dSimState.getFieldList().get(fieldId);
+		return state.getFieldList().get(fieldId);
 	}
 
 	public int getNumProcessors() throws RemoteException
 	{
-		return dSimState.getPartition().getNumProcessors();
+		return state.getPartition().getNumProcessors();
 	}
 
 	public IntRect2D getWorldBounds() throws RemoteException
 	{
-		return dSimState.getPartition().getWorldBounds();
+		return state.getPartition().getWorldBounds();
 	}
 
 	public long getSteps() throws RemoteException
 	{
-		return dSimState.schedule.getSteps();
+		return state.schedule.getSteps();
 	}
 
 	public double getTime() throws RemoteException
 	{
-		return dSimState.schedule.getTime();
+		return state.schedule.getTime();
 	}
 
 	public ArrayList<IntRect2D> getAllLocalBounds() throws RemoteException
 	{
-		return dSimState.getPartition().getAllBounds();
+		return state.getPartition().getAllBounds();
 	}
 
 	public static VisualizationProcessor getProcessor(int pid)
@@ -121,14 +157,14 @@ public class RemoteProcessor extends UnicastRemoteObject implements Visualizatio
 
 	public static String getProcessorName(int pid)
 	{
-		return NAME_PREFIX + pid;
+		return "<Processor "  + pid + ">" ;
 	}
 
 	private static VisualizationProcessor fetchAndUpdate(int pid)
 	{
 		try
 		{
-			VisualizationProcessor proc = DRegistry.getInstance().getObjectT(getProcessorName(pid));
+			VisualizationProcessor proc = DistinguishedRegistry.getInstance().getObjectT(getProcessorName(pid));
 			processorCache.set(pid, proc);
 			return proc;
 		}
@@ -140,47 +176,47 @@ public class RemoteProcessor extends UnicastRemoteObject implements Visualizatio
 
 	public int getAOI() throws RemoteException
 	{
-		return dSimState.getPartition().getAOI();
+		return state.getPartition().getAOI();
 	}
 
 	public int getProcessorLevels() throws RemoteException
 	{
-		return dSimState.getPartition().getTreeDepth();
+		return state.getPartition().getTreeDepth();
 	}
 
 	public int[] getProcessorNeighborhood(int level) throws RemoteException
 	{
-		return dSimState.getPartition().getProcessorNeighborhood(level);
+		return state.getPartition().getProcessorNeighborhood(level);
 	}
 	
 	//Raj: input pids and get all neighbors in the lowest point in quadtree that contains inputed pids
-	public int[] getMinimumNeighborhood(int[] proc_ids) throws RemoteException
+	public int[] getMinimumNeighborhood(int[] procIDs) throws RemoteException
 	{
-		if (proc_ids.length == 1)
+		if (procIDs.length == 1)
 		{
-			return proc_ids;
+			return procIDs;
 		}
 		
-		int selected_level = dSimState.getPartition().getTreeDepth(); //-1?
+		int selectedLevel = state.getPartition().getTreeDepth(); //-1?
 		
-		for (int i=selected_level; i>=0; i--)
+		for (int i=selectedLevel; i>=0; i--)
 		{
-			boolean all_contained = true;
+			boolean allContained = true;
 			
-			int[] chosen_neighborhood = getProcessorNeighborhood(i); //this should contain all partitions
+			int[] chosenNeighborhood = getProcessorNeighborhood(i); //this should contain all partitions
 			
-			for (int a : chosen_neighborhood)
+			for (int a : chosenNeighborhood)
 			{
 				System.out.println(a);
 			}
 
 			
-			for (int proc_id : proc_ids)
+			for (int procID : procIDs)
 			{
 				boolean contained = false;
-				for (int neigh_id : chosen_neighborhood)
+				for (int neighborhoodID : chosenNeighborhood)
 				{
-					if (proc_id == neigh_id)
+					if (procID == neighborhoodID)
 					{
 						contained = true;
 						break; //found
@@ -190,51 +226,120 @@ public class RemoteProcessor extends UnicastRemoteObject implements Visualizatio
 				
 				if (contained == false)
 				{
-					all_contained = false;
+					allContained = false;
 					break;
 				}
 			}
 			
-			if (all_contained == true)
+			if (allContained == true)
 			{
-				return chosen_neighborhood;
+				return chosenNeighborhood;
 			}
 		}
 		
-        throw new RemoteException("some proc_ids not in quad tree");    
-        //return null;
+        throw new RemoteException("some procIDs not in quad tree");    
 	}
 
-	public ArrayList<Stat> getStatList() throws RemoteException
+	public ArrayList<Stat> getStats(int statType) throws RemoteException
 	{
-		return dSimState.getStatList();
+		return state.getStats(statType);
 	}
 
-	public ArrayList<Stat> getDebugList() throws RemoteException
+	public void startStats(int statType) throws RemoteException
 	{
-		return dSimState.getDebugList();
+		state.startStats(statType);
 	}
 
-	public void initStat() throws RemoteException
-	{
-		dSimState.recordStats = true;
+	public void stopStats(int statType) throws RemoteException
+	{	
+		state.stopStats(statType);
 	}
 
-	public void initDebug() throws RemoteException
-	{
-		dSimState.recordDebug = true;
+
+	//call Properties methods using this object
+	/*
+	public PropertiesRequester getPropRequester() {
+		if (propRequester == null) {
+			this.propRequester = new PropertiesRequester(this.state);
+		}
+		
+		return this.propRequester;
+	}
+	*/
+	
+
+	
+	public Object getPropertiesValue(int index) {
+		
+		if (prop == null) {
+			this.prop = sim.util.SimpleProperties.getProperties(state);
+
+		}
+		
+		return prop.getValue(index);
+		
+		
 	}
 
-	public void stopStat() throws RemoteException
-	{
-		dSimState.recordStats = false;
-	}
+	
+	public int getPropertiesNumProperties() {
+		
+		if (prop == null) {
+			this.prop = sim.util.SimpleProperties.getProperties(state);
 
-	public void stopDebug() throws RemoteException
-	{
-		dSimState.recordDebug = false;
-	}
+		}						
+		return prop.numProperties();
+		
+		
+	}	
 
+    
+    public String getPropertiesName(int index) {
+    	
+		if (prop == null) {
+			this.prop = sim.util.SimpleProperties.getProperties(state);
+
+		}
+    	
+		return  ((SimpleProperties)prop).getName(index);  	
+
+    }
+	
+
+
+    public String getPropertiesDescription(int index) {
+		if (prop == null) {
+			this.prop = sim.util.SimpleProperties.getProperties(state);
+
+		}   	
+		
+		return  ((SimpleProperties)prop).getDescription(index);  	
+
+    }
+
+    
+
+    public Object getPropertiesDomain(int index) {
+		if (prop == null) {
+			this.prop = sim.util.SimpleProperties.getProperties(state);
+
+		}
+		
+		return  ((SimpleProperties)prop).getDomain(index);  	
+
+    }
+
+    public boolean propertiesIsHidden(int index) {
+		if (prop == null) {
+			this.prop = sim.util.SimpleProperties.getProperties(state);
+
+		}  	
+		
+		return  ((SimpleProperties)prop).isHidden(index);  	
+
+    }
+    
+    
 //	// TODO: do we extend this to other Remote objects?
 //	private Remote getRemote(String key) {
 //		Remote remote = cache.get(key);
@@ -242,7 +347,7 @@ public class RemoteProcessor extends UnicastRemoteObject implements Visualizatio
 //			return remote;
 //		else {
 //			try {
-//				remote = (Remote) DRegistry.getInstance().getObject(key);
+//				remote = (Remote) DistinguishedRegistry.getInstance().getObject(key);
 //				cache.put(key, remote);
 //				return remote;
 //			} catch (RemoteException | NotBoundException e) {

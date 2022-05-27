@@ -6,20 +6,33 @@
 
 package sim.engine;
 
-import java.io.*;
-import java.rmi.*;
-import java.text.*;
-import java.util.*;
-import java.util.logging.*;
+import java.io.IOException;
+
+import java.io.Serializable;
+import java.rmi.AccessException;
+import java.rmi.NotBoundException;
+import java.rmi.RemoteException;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.logging.ConsoleHandler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
+import java.util.logging.SocketHandler;
+import java.rmi.server.UnicastRemoteObject;
+
 import ec.util.*;
 import mpi.*;
-import sim.engine.transport.*;
+import sim.display.*;
+import sim.engine.mpi.*;
+import sim.engine.rmi.*;
 import sim.field.*;
 import sim.field.partitioning.*;
 import sim.field.storage.*;
 import sim.util.*;
-import sim.engine.rmi.*;
-import sim.display.*;
 
 /**
  * Analogous to Mason's SimState. This class represents the entire distributed simulation.
@@ -45,78 +58,75 @@ public class DSimState extends SimState
 	static Logger logger;
 
 	/** The Partition of the DSimState */
-	protected QuadTreePartition partition;
-	/** The DSimState's TransporterMPI interface */
-	protected TransporterMPI transporter;
+	protected Partition partition;
+	/** The DSimState's Transporter interface */
+	
+	Transporter transporter;
 	HashMap<String, Serializable> rootInfo = null;
 	HashMap<String, Serializable>[] init = null;
 
-	// The statistics queue lock
-	final Object statLock = new Object[0];
 	// The statistics queue
-	ArrayList<Stat> statList = new ArrayList<>();
-	public boolean recordStats = false;
-
-	// The debug queue lock
-	final Object debugStatLock = new Object[0];
-	// The debug queue
-	ArrayList<Stat> debugList = new ArrayList<>();
-	public boolean recordDebug = false;
-
+	ArrayList<Stat> statList[] = new ArrayList[VisualizationProcessor.NUM_STAT_TYPES];
+ 	boolean statsStarted[] = new boolean[VisualizationProcessor.NUM_STAT_TYPES];
+ 	public static final int DEFAULT_MAX_STATS = 16384;
+ 	int maxStats = DEFAULT_MAX_STATS;
+ 	
 	// The RemoteProcessor interface for communicating via RMI
 	RemoteProcessor processor;
 
 	// A list of all fields in the Model. Any HaloField that is created will
 	// register itself here.
-	// Not to be confused with the DRegistry.
+	// Not to be confused with the DistinguishedRegistry.
 	ArrayList<HaloGrid2D<?, ?>> fieldList;
 
 	// The RMI registry
-	protected DRegistry registry;
-
-	// Flag to understand if the registry is enabled
-	public static boolean withRegistry;
-
+	DistinguishedRegistry registry;
 
 	// The number of steps between load balances
 	protected int balanceInterval = 100;
+	
+	// How often globals are updated
+	int updateGlobalsInterval = 100;
+	
+	protected int maxStatSize = 10000;
+	
 	// The current balance level FIXME: This looks primitive, and also requires that
 	// be properly in sync
 	int balancerLevel;
-	// Queue of RemotePromise to fill
-	static ArrayList<DObject> globalRemotePromises = new ArrayList<>();
-		
-	// Queue of RemotePromise to filled and to unregister
-	static ArrayList<RemotePromise> filledPromises = new ArrayList<>();
+	
+	// Arraylist where the RemoteMessage are stored
+	// the methods invoked on it have to be synchronized to avoid concurrent modification
+	ArrayList<DistinguishedRemoteMessage> distinguishedMessageQueue = new ArrayList<DistinguishedRemoteMessage>();
 
+	
+	
 	/**
 	 * Builds a new DSimState with the given random number SEED, the WIDTH and HEIGIHT of the entire model (not just the
-	 * partition), and the AREA OF INTEREST (AOI) for the halo field
+	 * partition), the AREA OF INTEREST (AOI) for the halo field, and whether or not the model is TOROIDAL
 	 */
-	public DSimState(long seed, int width, int height, int aoi)
-	{
-		super(seed, new MersenneTwisterFast(seed), new DistributedSchedule());
-		this.partition = new QuadTreePartition(width, height, true, aoi);
-		partition.initialize();
-		balancerLevel = ((QuadTreePartition) partition).getQt().getDepth() - 1;
-		transporter = new TransporterMPI(partition);
-		fieldList = new ArrayList<>();
-		rootInfo = new HashMap<>();
-		withRegistry = false;
-	}
-
 	public DSimState(long seed, int width, int height, int aoi, boolean isToroidal)
 	{
 		super(seed, new MersenneTwisterFast(seed), new DistributedSchedule());
-		this.partition = new QuadTreePartition(width, height, isToroidal, aoi);
+		this.partition = new Partition(width, height, isToroidal, aoi);
 		partition.initialize();
-		balancerLevel = ((QuadTreePartition) partition).getQt().getDepth() - 1;
-		transporter = new TransporterMPI(partition);
+		balancerLevel = ((Partition) partition).getQt().getDepth() - 1;
+		transporter = new Transporter(partition);
 		fieldList = new ArrayList<>();
 		rootInfo = new HashMap<>();
-		withRegistry = false;
-	}	
+		
+		// initialize statistics lists
+		for(int i = 0; i < statList.length; i++)
+			{
+			statList[i] = new ArrayList<>(); 
+			}
+	}
 	
+	
+	
+	
+	///// PID 
+	
+
 	
 	// loads and stores the pid.
 	// Only call this after COMM_WORLD has been set up.
@@ -133,8 +143,9 @@ public class DSimState extends SimState
 	}
 
 	/**
-	 * Only call this method after COMM_WORLD has been setup. </br>
-	 * It's safe to call it in the start method and after.
+	 * Returns the partition's PID.  Do not call this method prior to start() or startRoot(),
+	 * as MPI may not have been set up yet and you will likely receive a RuntimeException.
+	 * It's safe to call it in these methods and afterwards.
 	 * 
 	 * @return Current pid
 	 */
@@ -146,6 +157,13 @@ public class DSimState extends SimState
 		}
 		return pid;
 	}
+
+
+
+
+
+	////// MULTITHREADING
+
 
 	/**
 	 * Returns whether the DSimState is assuming that you may be allocating DObjects in a multithreaded environment. In general
@@ -176,6 +194,14 @@ public class DSimState extends SimState
 			throw new RuntimeException("multiThreaded(...) may only be called once.");
 	}
 
+
+
+
+
+
+	////// HALO FIELD INTERACTION
+
+
 	/**
 	 * All HaloFields register themselves here.<br>
 	 * Do not call this method explicitly, it's called in the HaloField constructor
@@ -190,651 +216,98 @@ public class DSimState extends SimState
 		fieldList.add(halo);
 		return index;
 	}
+	
+	/**
+	 * @return the partition
+	 */
+	public Partition getPartition()
+		{
+		return partition;
+		}
 
 	/**
-	 * Calls Sync on all the fields
-	 *
-	 * @throws MPIException
-	 * @throws RemoteException
+	 * @return an arraylist of all the HaloGrid2Ds registered with the SimState
 	 */
-	void syncFields() throws MPIException, RemoteException
-	{
-		for (final Synchronizable haloField : fieldList)
-			haloField.syncHalo();
-	}
-
-	void syncRemoveAndAdd() throws MPIException, RemoteException
-	{
-		for (final HaloGrid2D<?, ?> haloField : fieldList)
-			haloField.syncRemoveAndAdd();
-	}
-
-	/**
-	 * This method is called immediately before after the schedule. At present it is empty. Nonetheless, if you override this
-	 * method, you absolutely need to call super.postSchedule() first.
-	 */
-	public void postSchedule()
-	{
-		// does nothing
-	}
-
-	/**
-	 * This method is called immediately before stepping the schedule, and it handles all the partition-to-partition transfer and
-	 * communication between steps. If you override this method, you absolutely need to call super.preSchedule() first.
-	 */
-	public void preSchedule()
-	{
-		Timing.stop(Timing.LB_RUNTIME);
-		Timing.start(Timing.MPI_SYNC_OVERHEAD);
-		
-		try
+	public ArrayList<HaloGrid2D<?, ?>> getFieldList()
 		{
-			// Wait for all agents globally to stop moving
-			MPI.COMM_WORLD.barrier();
-
-			if (withRegistry) {
-				try {
-					for (RemotePromise promisesFilled : filledPromises) {
-						this.getDRegistry().unRegisterObject(promisesFilled.getPromiseId());
-					}
-					filledPromises.clear();
-				} catch (Exception e) {
-					e.printStackTrace();
-				}
-			}
-
-			// give time for Visualizer
-			try
-			{
-				processor.unlock();
-				processor.lock();
-			}
-			catch (RemoteException e1)
-			{
-				throw new RuntimeException(e1);
-			}
-
-			// check for RemotePromise to fill and fill them
-			if (withRegistry && !globalRemotePromises.isEmpty()) {				
-				// search for all the agent that has some promises to fill
-				
-				for(DObject objWithPromises : globalRemotePromises) {
-					// check if the agent is migrated or not
-					
-					if (!DRegistry.getInstance().getMigratedNames().contains(objWithPromises.getExportedName())) {
-						
-						// search for all the promises within the agent
-						for (RemotePromise promise : objWithPromises.getUnfilledPromises()){
-							// use the method of the remote interface to fill the promise
-							Serializable content = objWithPromises.fillRemotePromise(promise.getTag(), promise.getArgs());
-							
-							promise.fulfill(content);
-							// register the filled promise on the DRegistry
-							this.getDRegistry().registerObject(promise.getPromiseId(), promise);
-							// add the promise to the filledPromises queue
-							filledPromises.add(promise);
-						}
-						// all the promises of the object have been fulfilled
-						objWithPromises.getUnfilledPromises().clear();
-					}
-				}
-				globalRemotePromises.clear();
-			}
-			
-			// Sync all the Remove and Add queues for RMI
-			syncRemoveAndAdd();
-			
-			transporter.sync();
-
-			if (withRegistry)
-			{
-				// All nodes have finished the synchronization and can unregister exported objects.
-				MPI.COMM_WORLD.barrier();
-
-				// After the synchronization we can unregister migrated object!
-				// remove exported-migrated object from local node
-				for (String mo : DRegistry.getInstance().getMigratedNames())
-				{
-					try
-					{
-						DRegistry.getInstance().unRegisterObject(mo);
-					}
-					catch (NotBoundException e)
-					{
-						e.printStackTrace();
-					}
-				}
-				DRegistry.getInstance().clearMigratedNames();
-				MPI.COMM_WORLD.barrier();
-			}
+		return fieldList;
 		}
-		catch (ClassNotFoundException | MPIException | IOException e)
-		{
-			throw new RuntimeException(e);
-		}
-
-
-		for (final PayloadWrapper payloadWrapper : transporter.objectQueue)
-		{
-
-			// filling the remotePromise of migrated object
-			DObject mobj = null;
-
-			if(payloadWrapper.payload instanceof DistributedIterativeRepeat)
-				mobj = ((DObject) ((DistributedIterativeRepeat)payloadWrapper.payload).getSteppable());
-			else if ((payloadWrapper.payload instanceof AgentWrapper))
-				mobj = ((DObject) ((AgentWrapper)payloadWrapper.payload).agent);
-
-			if (withRegistry && mobj!=null)
-				{
-					
-					if (mobj.getExportedName() != null)
-					{
-						try
-						{
-							DRegistry.getInstance().registerObject(mobj.getExportedName(), (Remote) mobj);
-							DObject objWithPromises = (DObject) (mobj);
-							// search for all the promises within the agent
-							for (RemotePromise promise : objWithPromises.getUnfilledPromises()){
-								// use the method of the remote interface to fill the promise
-								Serializable content = objWithPromises.fillRemotePromise(promise.getTag(), promise.getArgs());
-								promise.fulfill(content);
-								// register the filled promise on the DRegistry
-								this.getDRegistry().registerObject(promise.getPromiseId(), promise);
-								
-								// add the promise to the filledPromises queue
-								filledPromises.add(promise);
-							}
-							// all the promises of the object have been fulfilled
-							objWithPromises.getUnfilledPromises().clear();
-						}
-						catch (RemoteException e)
-						{
-							e.printStackTrace();
-						}
-					}
-				}
-
-			/*
-			 * Assumptions about what is to be added to the field using addToField method rely on the fact that the wrapper
-			 * classes are not directly used By the modelers
-			 *
-			 * In case of IterativeRepeat step is added to the field. For PayloadWrapper we add agent and, for all other cases we
-			 * add the object itself to the field
-			 *
-			 * Improperly using the wrappers and/or fieldIndex will cause Class cast exceptions to be thrown
-			 */
-
-			if (payloadWrapper.fieldIndex >= 0)
-			{
-				// add the object to the field
-				fieldList.get(payloadWrapper.fieldIndex).addPayload(payloadWrapper);
-			}
-
-			if (payloadWrapper.payload instanceof DistributedIterativeRepeat)
-			{
-				final DistributedIterativeRepeat iterativeRepeat = (DistributedIterativeRepeat) payloadWrapper.payload;
-
-				// TODO: how to schedule for a specified time?
-				// Not adding it to specific time because we get an error -
-				// "the time provided (-1.0000000000000002) is < EPOCH (0.0)"
-
-				Stopping stopping = iterativeRepeat.getSteppable();
-				stopping.setStoppable(
-						schedule.scheduleRepeating(stopping, iterativeRepeat.getOrdering(), iterativeRepeat.interval));
-			}
-			else if (payloadWrapper.payload instanceof AgentWrapper)
-			{
-				final AgentWrapper agentWrapper = (AgentWrapper) payloadWrapper.payload;
-
-				if (agentWrapper.time < 0)
-					schedule.scheduleOnce(agentWrapper.agent, agentWrapper.ordering);
-				else
-					schedule.scheduleOnce(agentWrapper.time, agentWrapper.ordering, agentWrapper.agent);
-			}
-		}
-
-		transporter.objectQueue.clear();
-
-		// Wait that all nodes have registered their new objects in the distributed
-		// registry.
-		try
-		{
-			MPI.COMM_WORLD.barrier();
-			syncFields();
-		}
-		catch (MPIException | RemoteException e)
-		{
-			e.printStackTrace();
-		}
-
-		Timing.stop(Timing.MPI_SYNC_OVERHEAD);
-		loadBalance();
-
-	}
-
-	void loadBalance()
-	{
-		/*
-		 * Check if it's time to run load balance based on the balanceInterval defined
-		 */
-		if (schedule.getSteps() > 0 && (schedule.getSteps() % balanceInterval == 0))
-		{
-			try
-			{
-				// Balance the partitions for the given level migrating the agents
-				balancePartitions(balancerLevel);
-
-				try
-				{
-
-
-					transporter.sync();
-					
-
-					
-					
-				}
-				catch (ClassNotFoundException | IOException e1)
-				{
-					throw new RuntimeException(e1);
-				}
-
-				// being transported from elsewhere, needs to be added to this partition's
-				// HaloGrid and schedule
-				for (final PayloadWrapper payloadWrapper : transporter.objectQueue)
-				{
-
-					/*
-					 * Assumptions about what is to be added to the field using addToField method rely on the fact that the
-					 * wrapper classes are not directly used By the modelers
-					 *
-					 * In case of IterativeRepeat step is added to the field. For PayloadWrapper we add agent and, for all other
-					 * cases we add the object itself to the field
-					 *
-					 * Improperly using the wrappers and/or fieldIndex will cause Class cast exceptions to be thrown
-					 */
-
-					// add payload into correct HaloGrid
-					if (payloadWrapper.fieldIndex >= 0)
-					{
-						// add the object to the field
-						fieldList.get(payloadWrapper.fieldIndex).addPayload(payloadWrapper);
-						//verify it was added to the correct location!
-						
-
-					}
-					
-					
-
-					
-
-					// DistributedIterativeRepeat
-					if (payloadWrapper.payload instanceof DistributedIterativeRepeat)
-					{
-						final DistributedIterativeRepeat iterativeRepeat = (DistributedIterativeRepeat) payloadWrapper.payload;
-
-						// TODO: how to schedule for a specified time?
-						// Not adding it to specific time because we get an error -
-						// "the time provided (-1.0000000000000002) is < EPOCH (0.0)"
-
-						// add back to schedule
-						Stopping stopping = iterativeRepeat.getSteppable();
-						stopping.setStoppable(schedule.scheduleRepeating(stopping, iterativeRepeat.getOrdering(),
-								iterativeRepeat.interval));
-
-					}
-					else if (payloadWrapper.payload instanceof AgentWrapper)
-					{
-						final AgentWrapper agentWrapper = (AgentWrapper) payloadWrapper.payload;
-
-						// I am currently unclear on how this works
-						if (withRegistry)
-						{
-							if (((DObject)agentWrapper.agent).getExportedName() != null)
-							{
-								try
-								{
-									DRegistry.getInstance().registerObject(((DObject)agentWrapper.agent).getExportedName(),
-											(Remote) agentWrapper.agent);
-								}
-								catch (RemoteException e)
-								{
-									e.printStackTrace();
-								}
-							}
-						}
-
-						// add back to schedule
-						if (agentWrapper.time < 0)
-							schedule.scheduleOnce(agentWrapper.agent, agentWrapper.ordering);
-						else
-							schedule.scheduleOnce(agentWrapper.time, agentWrapper.ordering, agentWrapper.agent);
-					}
-					
-
-				}
-
-
-				
-				// Wait that all nodes have registered their new objects in the distributed registry.
-				try
-				{
-					MPI.COMM_WORLD.barrier();
-					
-					//for (Synchronizable field : fieldList) {
-					//     ((HaloGrid2D) field).loc_disagree_all_points("lb4");
-					//}
-					
-					syncFields();
-				}
-				catch (MPIException e)
-				{
-					throw new RuntimeException(e);
-				}
-
-				// clear queue
-				transporter.objectQueue.clear();
-
-			}
-			catch (MPIException | RemoteException e)
-			{
-				throw new RuntimeException(e);
-			}
-
-			// I'm not sure about this bit exactly
-			if (balancerLevel != 0)
-				balancerLevel--;
-			else
-				balancerLevel = ((QuadTreePartition) partition).getQt().getDepth() - 1;
-			try
-			{
-				MPI.COMM_WORLD.barrier();
-			}
-			catch (MPIException e)
-			{
-				throw new RuntimeException(e);
-			}
-		}
-		
-
-	}
 
 	/*
-	 * Balance the partition for the given level by moving the agent according to the new shape (new centroid). Takes all the
-	 * agents inside the partition before the balance, clones them and moves them to the new location. Then the moved agents are
-	 * removed from the old partition.
+	 * @return The Transporter
 	 */
-	void balancePartitions(int level) throws MPIException
-	{
-		
-
-		int x = countTotalAgents(fieldList.get(0));
-
-		if (this.getPID() == 0) {
-			
-			System.out.println("field num of agents : "+x);
-
-			System.out.println("---");
-		}
-		
-		//System.out.println("balancing");
-		
-		final IntRect2D old_partition = partition.getLocalBounds();
-		final int old_pid = partition.getPID();
-
-		final Double runtime = Timing.get(Timing.LB_RUNTIME).getMovingAverage(); // used to compute the position of the new
-																					// centroids
-		Timing.start(Timing.LB_OVERHEAD);
-
-		((QuadTreePartition) partition).balance(runtime, level); // balance the partition moving the centroid for the given level
-		MPI.COMM_WORLD.barrier();
-
-		// Raj rewrite
-		for (Synchronizable field : fieldList)
+	public Transporter getTransporter()
 		{
+		return transporter;
+		}
 
-			
-			ArrayList<Object> migratedAgents = new ArrayList<>();
-			HaloGrid2D haloGrid2D = (HaloGrid2D) field;
 
-			// ContinousStorage, do we need its own case anymore? We may be able to combine with else code.
-			if (haloGrid2D.getStorage() instanceof ContinuousStorage)
+
+
+
+
+
+
+
+	
+
+
+	//// DISTINGUISHED OBJECTS
+
+
+
+	/**
+	 * @return the DistinguishedRegistry instance, or null if the registry is not available. You can call this method after calling the
+	 *         start() method.
+	 */
+	public boolean registerDistinguishedObject(Distinguished obj) throws AccessException, RemoteException
+		{
+			try 
 			{
-
-				ContinuousStorage st = (ContinuousStorage) haloGrid2D.getStorage();
-				// for cell
-				for (int i = 0; i < st.storage.length; i++)
-				{
-					// don't bother with situations where no point would be valid
-					IntRect2D storage_bound = st.getCellBounds(i);
-
-					// if storage_bound entirely in haloGrid localBounds, no need to check
-					if (!haloGrid2D.getLocalBounds().contains(storage_bound))
-					{
-						// for agent/entity in cell
-						// HashSet agents = new HashSet(((HashMap) st.storage[i].clone()).values());
-						// clones to avoid ConcurrentModificationException
-						HashSet agents = new HashSet(((HashMap) st.storage[i]).values());
-
-						for (Object a : agents)
-						{
-							Double2D loc = st.getObjectLocation((DObject) a);
-
-							if (a instanceof Stopping && !migratedAgents.contains(a) && old_partition.contains(loc)
-									&& !partition.getLocalBounds().contains(loc))
-							{
-								final int locToP = partition.toPartitionPID(loc); // we need to use this, not toP
-
-								Stopping stopping = ((Stopping) a);
-
-								// stop agent in schedule, then migrate it
-								if (stopping.getStoppable() instanceof DistributedTentativeStep)
-								{
-									try
-									{
-										stopping.getStoppable().stop();
-
-										transporter.migrateAgent((Stopping) a, locToP, loc,
-												((HaloGrid2D) field).getFieldIndex());
-
-									}
-									catch (Exception e)
-									{
-										System.out.println("PID: " + partition.getPID() + " exception on " + a);
-									}
-
-								}
-
-								// stop agent in schedule, then migrate it
-								if (stopping.getStoppable() instanceof IterativeRepeat)
-								{
-									final IterativeRepeat iterativeRepeat = (IterativeRepeat) stopping.getStoppable();
-									final DistributedIterativeRepeat distributedIterativeRepeat = new DistributedIterativeRepeat(
-											stopping,
-											iterativeRepeat.getTime(), iterativeRepeat.getInterval(),
-											iterativeRepeat.getOrdering());
-
-									transporter.migrateRepeatingAgent(distributedIterativeRepeat, locToP, loc,
-											((HaloGrid2D) field).getFieldIndex());
-
-									iterativeRepeat.stop();
-								}
-
-								// keeps track of agents being moved so not added again
-								migratedAgents.add(a);
-								System.out.println("PID: " + partition.getPID() + " processor " + old_pid + " move " + a
-										+ " from " + loc + " to processor " + locToP);
-								// here the agent is removed from the old location TOCHECK!!!
-							}
-
-							// not stoppable (transport a double or something) transporter call transportObject?
-							else if (old_partition.contains(loc) && !partition.getLocalBounds().contains(loc))
-							{
-								final int locToP = partition.toPartitionPID(loc); // we need to use this, not toP
-								transporter.transportObject((Serializable) a, locToP, loc, ((HaloGrid2D) field).getFieldIndex());
-							}
-						}
-					}
-				}
-			}
-
-			// other types of storage
-			else
+				return registry.registerObject(obj, this);
+			} 
+			catch (Exception e) 
 			{
-				GridStorage st = ((HaloGrid2D) field).getStorage();
-
-				// go by point here
-				for (Int2D p : old_partition.getPointList()) //should we ignore halobound here?
-					{
-					
-					// check if the new partition contains the point
-					if (!partition.getLocalBounds().contains(p))
-					{
-						final int toP = partition.toPartitionPID(p);
-
-						Serializable a_list = st.getAllObjects(p);
-
-						if (a_list != null)
-						{
-
-							/*
-							 * ArrayList<Serializable> a_list_copy = new ArrayList(); for (int i = 0; i < ((ArrayList)
-							 * a_list).size(); i++) { Serializable a = ((ArrayList<Serializable>) a_list).get(i);
-							 * a_list_copy.add(a); }
-							 * 
-							 * 
-							 * for (int i = 0; i < a_list_copy.size(); i++) {
-							 * 
-							 * Serializable a = a_list_copy.get(i);
-							 */
-
-							// go backwards, so removing is safe
-							for (int i = ((ArrayList<Serializable>) a_list).size() - 1; i >= 0; i--)
-							{
-								Serializable a = ((ArrayList<Serializable>) a_list).get(i);
-								
-								
-								
-
-								
-
-								
-								
-								// if a is stoppable
-								if (a != null && a instanceof Stopping && !migratedAgents.contains(a)
-										&& old_partition.contains(p) && !partition.getLocalBounds().contains(p))
-								{
-									DSteppable stopping = ((DSteppable) a);
-									
-									
-
-									// stop and migrate
-									if (stopping.getStoppable() instanceof DistributedTentativeStep)
-									{
-										stopping.getStoppable().stop();
-										transporter.migrateAgent(stopping, toP, p,
-												((HaloGrid2D) field).getFieldIndex());
-									}
-
-									// stop and migrate
-									if (stopping.getStoppable() instanceof IterativeRepeat)
-									{
-										final IterativeRepeat iterativeRepeat = (IterativeRepeat) stopping
-												.getStoppable();
-										iterativeRepeat.stop();
-										final DistributedIterativeRepeat distributedIterativeRepeat = new DistributedIterativeRepeat(
-												stopping, iterativeRepeat.getTime(), iterativeRepeat.getInterval(),
-												iterativeRepeat.getOrdering());
-										transporter.migrateRepeatingAgent(distributedIterativeRepeat, toP, p,
-												((HaloGrid2D) field).getFieldIndex());
-									}
-
-									migratedAgents.add(stopping);
-									System.out.println(
-											"PID: " + partition.getPID() + " processor " + old_pid + " move " + stopping
-													+ " from " + p + " (point " + p + ") to processor " + toP+ " "+partition.getLocalBounds(toP));
-
-									// here the agent is removed from the old location TOCHECK!!!
-									// haloGrid2D.removeLocal(p, stopping.ID());
-									
-									st.removeObject(p, stopping.ID());
-									
-						
-									
-
-
-
-								}
-
-								// not stoppable (transport a double or something) transporter call transportObject?
-								else if (old_partition.contains(p) && !partition.getLocalBounds().contains(p) && !migratedAgents.contains(a))
-								{
-									transporter.transportObject((Serializable) a, toP, p,
-											((HaloGrid2D) field).getFieldIndex());
-								}
-
-								else
-								{
-									System.out.println(a + " not moved over");
-								}
-							}
-						}
-					}
-				}
-				
-				//((HaloGrid2D) field).loc_disagree_all_points("bp3");
-
-
+				e.printStackTrace();
+				return false;
 			}
 		}
-		MPI.COMM_WORLD.barrier();
-		Timing.stop(Timing.LB_OVERHEAD);
-		
-		//System.out.println("done balancing");
 
 
-	}
-
-	static void initRemoteLogger(final String loggerName, final String logServAddr, final int logServPort)
-			throws IOException
+	/**
+	Sends a message to a Distinguished object registered on the registry with the name NAME.
+	 */
+	public Promised sendRemoteMessage(String name, int tag, Serializable arguments) throws RemoteException
 	{
-		final SocketHandler sh = new SocketHandler(logServAddr, logServPort);
-		sh.setLevel(Level.ALL);
-		sh.setFormatter(new java.util.logging.Formatter()
+		RemotePromise callback = new RemotePromise();
+		try 
 		{
-			public String format(final LogRecord rec)
-			{
-				return String.format("[%s][%s][%s:%s][%-7s]\t %s",
-						new SimpleDateFormat("MM-dd-YYYY HH:mm:ss.SSS").format(new Date(rec.getMillis())),
-						rec.getLoggerName(), rec.getSourceClassName(), rec.getSourceMethodName(),
-						rec.getLevel().getLocalizedName(), rec.getMessage());
-			}
-		});
-		DSimState.logger = Logger.getLogger(loggerName);
-		DSimState.logger.setUseParentHandlers(false);
-		DSimState.logger.setLevel(Level.ALL);
-		DSimState.logger.addHandler(sh);
+			UnicastRemoteObject.exportObject(callback, 0);
+			((DistinguishedRemote) DistinguishedRegistry.getInstance().getObject(name)).remoteMessage(tag, arguments, callback);
+			return callback;
+		} 
+		catch (Exception e) 
+		{
+		e.printStackTrace();
+		}
+		return null;
 	}
 
-	static void initLocalLogger(final String loggerName)
-	{
-		DSimState.logger = Logger.getLogger(loggerName);
-		DSimState.logger.setLevel(Level.ALL);
-		DSimState.logger.setUseParentHandlers(false);
-
-		final ConsoleHandler handler = new ConsoleHandler();
-		handler.setFormatter(new java.util.logging.Formatter()
+	
+	// Called by DistinguishedRemoteObject when it receives a message it must put on the queue to process
+	void addRemoteMessage(DistinguishedRemoteMessage message)
+    	{
+		synchronized(this.distinguishedMessageQueue)
 		{
-			public synchronized String format(final LogRecord rec)
-			{
-				return String.format("[%s][%-7s] %s%n",
-						new SimpleDateFormat("MM-dd-YYYY HH:mm:ss.SSS").format(new Date(rec.getMillis())),
-						rec.getLevel().getLocalizedName(), rec.getMessage());
-			}
-		});
-		DSimState.logger.addHandler(handler);
+			distinguishedMessageQueue.add(message);
+		}
 	}
+	
+	
+
+
+
+	////// INITIALIZATION
 
 	public static final int DEFAULT_TIMING_WINDOW = 20;
 
@@ -877,6 +350,44 @@ public class DSimState extends SimState
 		}
 	}
 
+
+
+
+
+
+
+	////// STARTING
+
+
+	/**
+	 * Distribute the following keyed information from the root to all the nodes. This may be called inside startRoot().
+	 */
+	public void sendRootInfoToAll(String key, Serializable sendObj)
+	{
+		for (int i = 0; i < partition.getNumProcessors(); i++)
+		{
+			init[i].put(key, sendObj);
+		}
+	}
+
+	/**
+	 * Distribute the following keyed information from the root to a specific node (given by the pid). This may be called inside
+	 * startRoot().
+	 */
+	public void sendRootInfoToProcessor(int pid, String key, Serializable sendObj)
+		{
+		init[pid].put(key, sendObj);
+		}
+
+	/**
+	 * Extract information set to a processor by the root. This may be called inside start().
+	 */
+	public Serializable getRootInfo(String key)
+		{
+		return rootInfo.get(key);
+		}
+
+
 	/**
 	 * Modelers must override this method if they want to add any logic that is unique to the root processor
 	 */
@@ -884,31 +395,25 @@ public class DSimState extends SimState
 	{
 	}
 
-	/**
-	 * @return the DRegistry instance, or null if the registry is not available. You can call this method after calling the
-	 *         start() method.
-	 */
-	public DRegistry getDRegistry()
-		{
-		return registry;
-		}
 
 	public void start()
 	{
 		super.start();
-//		RMIProxy.init();
 
-		if (withRegistry)
-		{
-			/* distributed registry inizialization */
-			registry = DRegistry.getInstance();
-		}
+		// distributed registry inizialization
+		registry = DistinguishedRegistry.getInstance();
 
 		try
 		{
 			processor = new RemoteProcessor(this);
-			processor.lock();
-			// unlocks in preSchedule
+			// only the root partition locks
+			if (partition.isRootProcessor())
+				{
+				processor.lock();
+				// unlocks in preSchedule
+				}
+			// all partitions do a propertieslock
+			processor.lockPartition();
 		}
 		catch (RemoteException e1)
 		{
@@ -919,7 +424,7 @@ public class DSimState extends SimState
 		{
 			syncFields();
 
-			for (final Synchronizable haloField : fieldList)
+			for (HaloGrid2D haloField : fieldList)
 				haloField.initRemote();
 
 			if (partition.isRootProcessor())
@@ -966,325 +471,785 @@ public class DSimState extends SimState
 		}
 	}
 
-	/**
-	 * @return the partition
-	 */
-	public QuadTreePartition getPartition()
-		{
-		return partition;
-		}
 
-	/**
-	 * @return an arraylist of all the HaloGrid2Ds registered with the SimState
-	 */
-	public ArrayList<HaloGrid2D<?, ?>> getFieldList()
-		{
-		return fieldList;
-		}
 
-	/*
-	 * @return the Transporter
-	 */
-	public TransporterMPI getTransporter()
-		{
-		return transporter;
-		}
 
-	/**
-	 * Distribute the following keyed information from the root to all the nodes. This may be called inside startRoot().
-	 */
-	public void sendRootInfoToAll(String key, Serializable sendObj)
-	{
-		for (int i = 0; i < partition.getNumProcessors(); i++)
-		{
-			init[i].put(key, sendObj);
-		}
-	}
 
-	/**
-	 * Distribute the following keyed information from the root to a specific node (given by the pid). This may be called inside
-	 * startRoot().
-	 */
-	public void sendRootInfoToProcessor(int pid, String key, Serializable sendObj)
-		{
-		init[pid].put(key, sendObj);
-		}
 
-	/**
-	 * Extract information set to a processor by the root. This may be called inside start().
-	 */
-	public Serializable getRootInfo(String key)
-		{
-		return rootInfo.get(key);
-		}
 
-	public void enableRegistry()
-		{
-		withRegistry = true;
-		}
+	//// STATISTICS FACILITY
+
 
 	/**
 	 * Log statistics data for this timestep. This data will then be sent to a remote statistics computer.
 	 */
-	public void addStat(Serializable data)
+	public static final int ADD_STAT_FULL = -1;
+	public static final int ADD_STAT_STOPPED = 0;
+	public static final int ADD_STAT_SUCCESS = 1;
+	
+	/** 
+		Log a statistics entry for the given stat type (presently one of VisualizationProcessor.STAT_TYPE_STATISTICS or VisualizationProcessor.STAT_TYPE_DEBUG).
+		If the log stream is not currently running for this stat type, then the entry will not be logged and ADD_STAT_STOPPED will be returned.
+		If the log stream is running, but is filled up (because it has not lately been accessed and cleared by the remote visualizer tool),
+		then the entry will not be logged and ADD_STAT_FULL will be returned.  Otherwise the entry will be logged and ADD_STAT_SUCCESS will be returned.
+		The maximum number of entries that stat streams may hold before they are filled up is specified by getMaxStats() and can be changed
+		via setMaxStats().  You can test to see if a stream is started via getStatStarted(...).
+	*/
+	public int addStat(Serializable data, int statType)
 	{
-		synchronized (statLock)
+	if (statsStarted[statType]) 
 		{
-			if (recordStats)
-				statList.add(new Stat(data, schedule.getSteps()));
+		if (statList[statType].size() >= maxStats) return ADD_STAT_FULL;
+		statList[statType].add(new Stat(data, schedule.getSteps(), schedule.getTime()));
+		return ADD_STAT_SUCCESS;
 		}
+	return ADD_STAT_STOPPED;
+	}
+	
+	/** Returns the maximum number of Stat log entries that a stream can hold before it is full and will not accept any more.	*/
+ 	public int getMaxStats() { return maxStats; }
+ 	
+	/** Sets the maximum number of Stat log entries that a stream can hold before it is full and will not accept any more.	*/
+ 	public void setMaxStats(int val) { maxStats = val; }
+	
+	
+	/** Returns true if the log stream for the given statistics type is running. */
+	public boolean getStatsStarted(int statType)
+		{
+		return statsStarted[statType]; 
+		}
+	
+	/** Start running the log stream for the given statistics type.  If it is already running, this has no effect.
+		You can start this stream in your start() method if you wish; alternatively a remote visualization tool
+		can start the stream in its SimStateProxy class.  */
+	public void startStats(int statType) 
+	{	
+		statsStarted[statType] = true;
+
+	}
+	
+	/** Stop running the log stream for the given statistics type.  If it is already stopped, this has no effect.
+		You can stop this stream in your start() method if you wish; alternatively a remote visualization tool
+		can stop the stream in its SimStateProxy class.  */
+	public void stopStats(int statType) 
+	{
+		statsStarted[statType] = false;
+		// clear stats
+		statList[statType] = new ArrayList<>();
 	}
 
-	/**
-	 * Log debug statistics data for this timestep. This data will then be sent to a remote statistics computer.
-	 */
-	public void addDebug(Serializable data)
+	/** Returns and clears all the Stat log entries for the given stat type.  You should not call this method;
+		it is called by the remote visualizer (which is why it must be public here. */
+	public ArrayList<Stat> getStats(int statType) throws RemoteException
 	{
-		synchronized (debugStatLock)
-		{
-			if (recordDebug)
-				debugList.add(new Stat(data, schedule.getSteps()));
-		}
+		ArrayList<Stat> ret = statList[statType];
+		statList[statType] = new ArrayList<>();
+		return ret;
 	}
 
-	/** Return the current list of logged statistics data and clear it. */
-	public ArrayList<Stat> getStatList()
+
+
+
+
+
+
+
+	//// GLOBALS FACILITY
+	
+		
+	// implement in subclass. Default simply returns the first one.
+	protected Serializable[] arbitrateGlobals(ArrayList<Serializable[]> allGlobals)
 	{
-		synchronized (statLock)
-		{
-			ArrayList<Stat> ret = statList;
-			statList = new ArrayList<>();
-			return ret;
-		}
+		if (allGlobals != null && allGlobals.get(0) != null)
+			return allGlobals.get(0);
+		else return null;
+	}
+	
+	// implement in subclass
+	protected Serializable[] getPartitionGlobals()
+	{
+		return null;
+
 	}
 
-	/** Return the current list of logged debug statistics data and clear it. */
-	public ArrayList<Stat> getDebugList()
+	// implement in subclass
+	protected void setPartitionGlobals(Serializable[] globals)
 	{
-		synchronized (debugStatLock)
-		{
-			ArrayList<Stat> ret = debugList;
-			debugList = new ArrayList<>();
-			return ret;
-		}
+		return;
 	}
 
-	// for communicating global variables (usually best) at each time step
-	// takes set of variables from each partition, picks the best from them in some
-	// way, then distributes the best back to each partition.
-	// Example: DPSO has a best fitness score and an x and y associated with that score
-	// 1) gather each best score and corresponding x and y from each parition (gatherGlobals())
-	// 2) arbitrate (pick the best score and its x and y out of the partition candidates (arbitrateGlobal)
-	// 3) distributed the winner back to each partition, each partition keeps track of the global
-	protected void updateGlobal()
+	protected void setUpdateGlobalsInterval(int val) { updateGlobalsInterval = val; }
+	protected int getUpdateGlobalsInterval() { return updateGlobalsInterval; }
+
+	// after determining the overall global using arbitration, send that one back to each partition
+	// uses setPartitionGlobals(), should be implemented in subclass (to match getPartititonGlobals())
+	void distributeGlobals(Serializable[] global)
 	{
-		Object[] g = null;
-
-		ArrayList<Object[]> gg = gatherGlobals();
-
-		if (partition.isRootProcessor())
+		try
 		{
-			g = arbitrateGlobal(gg);
+			// broadcast
+			global = MPIUtil.bcast(partition.getCommunicator(), global, 0);
+			setPartitionGlobals(global);
 		}
-
-		distributeGlobals(g);
-	}
-
-	// this one creates the best global out of the globals from each partiton (gg) should override in subclass
-	// this version picks based on the highest value of index 0
-	// TODO should we make this one throw an exception and force specific agent to implement its own?
-	Object[] arbitrateGlobal(ArrayList<Object[]> gg)
-	{
-		int chosen_index = 0;
-		Object chosen_item = gg.get(0)[0];
-
-		double best_val = (double) chosen_item; // make type invariant
-
-		for (int i = 0; i < partition.getNumProcessors(); i++)
-		{
-			if ((double) gg.get(i)[0] > best_val)
-			{
-				best_val = (double) gg.get(i)[0];
-				chosen_index = i;
-			}
-		}
-
-		return gg.get(chosen_index);
+		catch (Exception e) { }
 	}
 
 	// takes the set of globals from each partition the set of variables this is is implemented in getPartitionGlobals(),
 	// implemented in the specific subclass
-	ArrayList gatherGlobals()
+	ArrayList<Serializable[]> gatherGlobals()
 	{
 		try
 		{
 			// call getPartitionGlobals() for each partition
-			Object[] g = this.getPartitionGlobals();
-
-			// System.out.println(g[0]+" "+g[1]+" "+g[2]);
-
-			// Object[][] gg = new Object[partition.getNumProcessors()][g.length];
-
-			// partition.getCommunicator().gather(g, 1, MPI.DOUBLE, gg, 1, MPI.DOUBLE, 0); // fix type!
-			ArrayList<Object[]> gg = MPIUtil.gather(partition, g, 0);
+			Serializable[] g = this.getPartitionGlobals();
 			
-			if (this.getPID() == 0) {
-                for (int i=0; i<gg.size(); i++) {
-                	System.out.println(i+"---");
-                	for (Object ggg: gg.get(i)){
-                		System.out.println(ggg);
-                	}
-                }
-			}
-
-
-			return gg;
+			//should be null when getPartitionGlobals() not implemented in subclass
+			if (g == null) { return null; }
+			else 
+				{	
+				return MPIUtil.gather(partition, g, 0);
+				}
 		}
 		catch (Exception e)
 		{
 			System.out.println("error in gatherGlobals");
 			System.out.println(e);
 			System.exit(-1);
-
 		}
-
+		// cannot be reached
 		return null;
 	}
-
-	// after determining the overall global using arbitration, send that one back to each partition
-	// uses setPartitionGlobals(), should be implemented in subclass (to match getPartititonGlobals())
-	void distributeGlobals(Object[] global)
+	
+	// for communicating global variables (usually best) at each time step
+	// takes set of variables from each partition, picks the best from them in some
+	// way, then distributes the best back to each partition.
+	// To use, user must implement getPartitionGlobals, arbitrateGlobals, and setGlobals in subclass
+	// this method is called every "updateGlobalsInterval" steps, which is a field that can be changed by user
+	// Example: DPSO has a best fitness score and an x and y associated with that score
+	// 1) gather each best score and corresponding x and y from each partition (gatherGlobals())
+	// 2) arbitrate (pick the best score and its x and y out of the partition candidates (arbitrateGlobal)
+	// 3) distributed the winner back to each partition, each partition keeps track of the global
+	void updateGlobals()
 	{
-		// need to do typing
+		if (schedule.getSteps() > 0 && (schedule.getSteps() % updateGlobalsInterval == 0)) 
+			{
+			Serializable[] g = null;
+			ArrayList<Serializable[]> gg = gatherGlobals();
+		
+			//gg will be null if gatherPartitionGlobals is not implemented
+			if (gg != null) 
+			{
+				if (partition.isRootProcessor())
+				{
+					g = arbitrateGlobals(gg);
+				}
+				distributeGlobals(g);
+			}	
+		}
+	}
+
+
+	
+
+    public DistinguishedRegistry getRegistry() {
+    	return registry;
+    }
+
+
+
+
+	////// TOP-LEVEL LOOP
+	
+	
+
+	/**
+	 * Calls Sync on all the fields
+	 *
+	 * @throws MPIException
+	 * @throws RemoteException
+	 */
+	void syncFields() throws MPIException, RemoteException
+	{
+		for (HaloGrid2D haloField : fieldList)
+			{
+			haloField.syncHalo();
+			}
+	}
+
+	void syncRemoveAndAdd() throws MPIException, RemoteException
+	{
+		for (HaloGrid2D haloField : fieldList)
+			{
+			haloField.syncRemoveAndAdd();
+			}
+	}
+
+
+	// This is only here so it will show up in the documentation
+	/**
+	 * This method is called immediately before after the schedule. At present it is empty. Nonetheless, if you override this
+	 * method, you absolutely need to call super.postSchedule() first.
+	 */
+	public void postSchedule()
+	{
+		super.postSchedule();
+	}
+
+	/**
+	 * This method is called immediately before stepping the schedule, and it handles all the partition-to-partition transfer and
+	 * communication between steps. If you override this method, you absolutely need to call super.preSchedule() first.
+	 */
+	public void preSchedule()
+	{
+		Timing.stop(Timing.LB_RUNTIME);
+		// Timing.start(Timing.MPI_SYNC_OVERHEAD);
+		
 		try
 		{
-			// partition.getCommunicator().bcast(global, 1, MPI.DOUBLE, 0);
-			global = MPIUtil.bcast(partition.getCommunicator(), global, 0);
-			System.out.println("gl: "+global);
-			setPartitionGlobals(global);
-		}
-		catch (Exception e)
-		{
 
-		}
-	}
-
-	// implement in subclass
-	protected Object[] getPartitionGlobals()
-	{
-		throw new RuntimeException("getPartitionGlobals() should be implemented in subclass");
-	}
-
-	// implement in subclass
-	protected void setPartitionGlobals(Object[] o)
-	{
-		throw new RuntimeException("setPartitionGlobals() should be implemented in subclass");
-	}
-	
-	//testing method: counts agents in each storage (not in halo) and sums them.  Should remain constant!
-	protected int countTotalAgents(Synchronizable field) {
-		
-	
-		int total = 0;
-
-		try {
-			int count = countLocal(field);
-			ArrayList<Integer> counts = MPIUtil.gather(partition, count, 0);
-		
-			for (Integer c: counts) {
-				total = total + c;
-			}
-		}
-		
-		catch (Exception e) {
-		}
-		
-		return total;
-
-	}
-	
-	protected int countLocal(Synchronizable field) {
-		
-		HaloGrid2D haloGrid2D = (HaloGrid2D) field;
-		int count = 0;
-
-		// ContinousStorage, do we need its own case anymore? We may be able to combine with else code.
-		if (haloGrid2D.getStorage() instanceof ContinuousStorage)
-		{
-
-			ContinuousStorage st = (ContinuousStorage) haloGrid2D.getStorage();
-			// for cell
-			for (int i = 0; i < st.storage.length; i++)
-			{
-				HashSet agents = new HashSet(((HashMap) st.storage[i]).values());
-
-				for (Object a : agents) {
-					Double2D loc = st.getObjectLocation((DObject) a);
+			/*
+			MPI.COMM_WORLD.barrier();		
 					
-					if (partition.getLocalBounds().contains(loc)) {
-						count = count + 1;
+			// ALLOW INSPECTION
+			// We have a big problem regarding remote inspection.  If a remote inspector is just
+			// reading, and potentially writing, any data willy-nilly during the model runtime,
+			// then we have a race condition.  We can't have simple data access locks of course because
+			// that would be horrendously expensive.  Alternatively we could lock here and let
+			// an inspector do its thing, but this might be a piecemeal thing, with one lock
+			// per property, which would cause the visualizer to be very slow and also skip a lot
+			// of drawing.  :-(
+			try
+				{
+				processor.unlockPartition();
+				}
+			catch (RemoteException ex)
+				{
+				throw new RuntimeException(ex);
+				}
+
+
+			// ALLOW VISUALIZATION
+			// To do this, we will first have a barrier, so all partitions are synced up and
+			// waiting.  THEN we will unlock the root.  This will allow the remote visualizer
+			// to lock on the root.  We wait until the visualizer has done its work.  THEN
+			// we will relock on the root.  Finally we will have another barrier so everyone
+			// has synced up with the root, and we can go on.  Unfortunately this requires two
+			// barriers.  :-(
+
+			if (partition.isRootProcessor())
+				{
+				try
+					{
+					processor.unlock();
+					//// WARNING: it's possible that if the remote visualizer has DIED while
+					//// in a locked state, it won't release the lock and we'll hang here?  We
+					//// may need to use tryLock() instead with a timeout, which could be very
+					//// expensive, and maybe create a new lock replacing the original?  Not sure.
+
+					processor.lock();
+					}
+				catch (RemoteException ex)
+					{
+					throw new RuntimeException(ex);
+					}
+				}
+			MPI.COMM_WORLD.barrier();
+
+
+			// ALLOW INSPECTION AGAIN
+			// Now we relock the properties lock.  I *think* this avoids most deadlock conditions 
+			// where we're locked on one lock but the visualizer is locked on the other one?
+			
+				try
+					{
+					processor.lockPartition();
+					}
+				catch (RemoteException ex)
+					{
+					throw new RuntimeException(ex);
 					}
 
+
+			*/
+			//end test remove barrier			
+
+			// Sync all the Remove and Add queues for RMI
+			syncRemoveAndAdd();
+			
+			transporter.sync();
+
+			// After the synchronization we can unregister migrated object!
+			// remove exported-migrated object from local node
+			//cant remove
+			for (DistinguishedRemoteObject exportedObj : DistinguishedRegistry.getInstance().getAllLocalExportedObjects())
+			{
+				try
+				{
+					// if the object is migrated unregister it
+					if (DistinguishedRegistry.getInstance().isMigrated(exportedObj.object)) {
+						DistinguishedRegistry.getInstance().unregisterObject(exportedObj.object);
+					}
+				}
+				catch (NotBoundException e)
+				{
+					e.printStackTrace();
 				}
 			}
+			DistinguishedRegistry.getInstance().clearMigratedNames();
+
+			//wait all nodes to finish the unregister phase.
+			//cant remove
+			MPI.COMM_WORLD.barrier();
+
+		}
+		catch (ClassNotFoundException | MPIException | IOException e)
+		{
+			throw new RuntimeException(e);
+		}
+
+
+		for (final PayloadWrapper payloadWrapper : transporter.objectQueue)
+		{
+			/*
+			 * Assumptions about what is to be added to the field using addToField method rely on the fact that the wrapper
+			 * classes are not directly used By the modelers
+			 *
+			 * In case of IterativeRepeat step is added to the field. For PayloadWrapper we add agent and, for all other cases we
+			 * add the object itself to the field
+			 *
+			 * Improperly using the wrappers and/or fieldIndex will cause Class cast exceptions to be thrown
+			 */
+
+//			if (payloadWrapper.fieldIndex >= 0)
+			{
+				// add the object to the field
+				fieldList.get(payloadWrapper.fieldIndex).addPayload(payloadWrapper);
+			}
+
+			if (payloadWrapper.isAgent())
+			{
+
+				if(payloadWrapper.payload instanceof Distinguished)
+					{
+						try
+						{
+							DistinguishedRegistry.getInstance().registerObject((Distinguished) payloadWrapper.payload, this);
+						}
+						catch (RemoteException e)
+						{
+							e.printStackTrace();
+						}
+					}
+
+				if (payloadWrapper.isRepeating())
+					{
+					schedule.scheduleRepeating(payloadWrapper.time, payloadWrapper.ordering, (Steppable)(payloadWrapper.payload), payloadWrapper.interval);
+					}
+				else
+					{
+					schedule.scheduleOnce(payloadWrapper.time, payloadWrapper.ordering, (Steppable)(payloadWrapper.payload));
+					}
+			}
+		}
+
+		transporter.objectQueue.clear();
+
+		// Wait that all nodes have registered their new objects in the distributed
+		// registry.
+		try
+		{
+			MPI.COMM_WORLD.barrier();
+			syncFields();
+		}
+		catch (MPIException | RemoteException e)
+		{
+			e.printStackTrace();
 		}
 		
-		else {
-			
-			GridStorage st = ((HaloGrid2D) field).getStorage();
+		// Timing.stop(Timing.MPI_SYNC_OVERHEAD);
+		loadBalance();
+		
+		updateGlobals(); //only happens every updateGlobalInterval steps
+		
 
-			// go by point here
-			for (Int2D p : st.getShape().getPointList())
+		// we invoke the fullfill for every message in the distinguishedMessageQueue to make the Promise ready
+		try {
+			synchronized(this.distinguishedMessageQueue)
 			{
+			   for(DistinguishedRemoteMessage message: distinguishedMessageQueue)
+			   {
+				   Serializable data =
+					   message.object.remoteMessage(message.tag, message.arguments);
+				   message.callback.fulfill(data);
+			   }
+			   distinguishedMessageQueue.clear();
+		   }
+		   
+	   } 
+	   catch (Exception e) 
+	   {
+		   e.printStackTrace();
+	   }
+		
+	}
+
+
+
+
+
+
+
+
+
+	//// LOAD BALANCING
+
+
+	void loadBalance()
+	{
+		/*
+		 * Check if it's time to run load balance based on the balanceInterval defined
+		 */
+		if (schedule.getSteps() > 0 && (schedule.getSteps() % balanceInterval == 0))
+		{
+			try
+			{
+				// Balance the partitions for the given level migrating the agents
+				balancePartitions(balancerLevel);
+		        
+				try
+				{
+                    //sync transporter (objects moved to transporter.objectQueue)
+					transporter.sync();
+				}
+				catch (ClassNotFoundException | IOException e1)
+				{
+					throw new RuntimeException(e1);
+				}
 				
-				// check if the partition contains the point
-				if (partition.getLocalBounds().contains(p))
+
+				// being transported from elsewhere, needs to be added to this partition's
+				// HaloGrid and schedule
+				for (final PayloadWrapper payloadWrapper : transporter.objectQueue)
 				{
 
-					Serializable a_list = st.getAllObjects(p);
+					/*
+					 * Assumptions about what is to be added to the field using addToField method rely on the fact that the
+					 * wrapper classes are not directly used By the modelers
+					 *
+					 * In case of IterativeRepeat step is added to the field. For PayloadWrapper we add agent and, for all other
+					 * cases we add the object itself to the field
+					 *
+					 * Improperly using the wrappers and/or fieldIndex will cause Class cast exceptions to be thrown
+					 */
 
-					if (a_list != null)
+					// add payload into correct HaloGrid
+//					if (payloadWrapper.fieldIndex >= 0)
 					{
-						count = count + ((ArrayList<Serializable>) a_list).size();
+						// add the object to the field
+						fieldList.get(payloadWrapper.fieldIndex).addPayload(payloadWrapper);
+						//verify it was added to the correct location!
 					}
 					
-			
-			
-			
+					if (payloadWrapper.isAgent())
+					{
+
+						// I am currently unclear on how this works
+							if(payloadWrapper.payload instanceof Distinguished)
+							{
+								try
+								{
+									DistinguishedRegistry.getInstance().registerObject((Distinguished) payloadWrapper.payload, this);
+								}
+								catch (RemoteException e)
+								{
+									e.printStackTrace();
+								}
+							}
+
+					if (payloadWrapper.isRepeating())
+						{
+						schedule.scheduleRepeating(payloadWrapper.time, payloadWrapper.ordering, (Steppable)(payloadWrapper.payload), payloadWrapper.interval);
+						}
+					else
+						{
+						schedule.scheduleOnce(payloadWrapper.time, payloadWrapper.ordering, (Steppable)(payloadWrapper.payload));
+						}
+					}
+					
+
 				}
+
+				
+				// Wait that all nodes have registered their new objects in the distributed registry.
+				try
+				{
+					MPI.COMM_WORLD.barrier();
+					syncFields();
+				}
+				catch (MPIException e)
+				{
+					throw new RuntimeException(e);
+				}
+				
+		        //System.exit(-1);
+
+				// clear queue
+				transporter.objectQueue.clear();
+
+			}
+			catch (MPIException | RemoteException e)
+			{
+				throw new RuntimeException(e);
+			}
+
+			// I'm not sure about this bit exactly
+			if (balancerLevel != 0)
+				balancerLevel--;
+			else
+				balancerLevel = ((Partition) partition).getQt().getDepth() - 1;
+			try
+			{
+				MPI.COMM_WORLD.barrier();
+			}
+			catch (MPIException e)
+			{
+				throw new RuntimeException(e);
 			}
 		}
 		
-		return count;
-		
+
 	}
-	
+
 	/*
-	public static void loc_disagree(Int2D p, DHeatBug h, Partition p2, String s)
+	 * Balance the partition for the given level by moving the agent according to the new shape (new centroid). Takes all the
+	 * agents inside the partition before the balance, clones them and moves them to the new location. Then the moved agents are
+	 * removed from the old partition.
+	 */
+	void balancePartitions(int level) throws MPIException
 	{
-		
-		Int2D h_loc = new Int2D(h.loc_x, h.loc_y);
-		
-		int new_px = p.x;
-		int new_py = p.y;
-		
 
 		
-		Int2D new_p = new Int2D(new_px, new_py);
-		//System.out.println(s+" "+h +" h_loc "+h_loc+" p "+ p );
-		
-		if (!new_p.equals(h_loc))
+		final IntRect2D oldPartition = partition.getLocalBounds();
+		final int oldPID = partition.getPID();
+
+		// get the average time to run a step, used to compute the position of the new centroids
+		final Double avgRuntime = Timing.get(Timing.LB_RUNTIME).getMovingAverage(); 
+		//System.out.println("PID: " + getPID() + " avgRuntime: " + avgRuntime);
+		// Timing.start(Timing.LB_OVERHEAD);
+
+		((Partition) partition).balance(avgRuntime, level); // balance the partition moving the centroid for the given level
+		MPI.COMM_WORLD.barrier();
+
+		// Raj rewrite
+		for (HaloGrid2D field : fieldList)
 		{
-			
-			
-			
-			System.out.println(s+" loc disagree "+h+" h_loc "+h_loc+" p "+ p + " "+p2.getLocalBounds());
-			System.exit(-1);
+
+			ArrayList<Object> migratedAgents = new ArrayList<>();
+			HaloGrid2D haloGrid2D = (HaloGrid2D) field;
+
+			// ContinousStorage, do we need its own case anymore? We may be able to combine with else code.
+			if (haloGrid2D.getStorage() instanceof ContinuousStorage)
+			{
+
+				ContinuousStorage st = (ContinuousStorage) haloGrid2D.getStorage();
+				// for cell
+				for (int i = 0; i < st.storage.length; i++)
+				{
+					// don't bother with situations where no point would be valid
+					IntRect2D storageBound = st.getCellBounds(i);
+
+					// if storageBound entirely in haloGrid localBounds, no need to check
+					if (!haloGrid2D.getLocalBounds().contains(storageBound))
+					{
+						// for agent/entity in cell
+						// HashSet agents = new HashSet(((HashMap) st.storage[i].clone()).values());
+						// clones to avoid ConcurrentModificationException
+						HashSet agents = new HashSet(((HashMap) st.storage[i]).values());
+
+						for (Object a : agents)
+						{
+							Double2D loc = st.getObjectLocation((DObject) a);
+
+							if (a instanceof Stopping && !migratedAgents.contains(a) && oldPartition.contains(loc)
+									&& !partition.getLocalBounds().contains(loc))
+							{
+								final int locToP = partition.toPartitionPID(loc); // we need to use this, not toP
+
+								Stopping stopping = ((Stopping) a);
+								Stoppable stoppable = stopping.getStoppable();
+
+								// stop agent in schedule, then migrate it
+								if (stopping.getStoppable() instanceof DistributedTentativeStep)
+								{
+									DistributedTentativeStep step = (DistributedTentativeStep) stoppable;
+									stoppable.stop();
+									transporter.transport((DObject)stopping, locToP, loc, ((HaloGrid2D) field).getFieldIndex(), step.getOrdering(), step.getTime());
+
+								}
+
+
+								// stop agent in schedule, then migrate it
+								else if (stopping.getStoppable() instanceof DistributedIterativeRepeat)
+								{
+									final DistributedIterativeRepeat step = (DistributedIterativeRepeat) stopping.getStoppable();
+									stoppable.stop();
+									transporter.transport((DObject)stopping, locToP, loc, ((HaloGrid2D) field).getFieldIndex(), step.getOrdering(), step.getTime(), step.getInterval());
+								}
+
+								// keeps track of agents being moved so not added again
+								migratedAgents.add(a);
+								// System.out.println("PID: " + partition.getPID() + " processor " + oldPID + " move " + a
+										// + " from " + loc + " to processor " + locToP);
+								// here the agent is removed from the old location TOCHECK!!!
+							}
+
+							// not stoppable (transport a double or something) transporter call transportObject?
+							else if (oldPartition.contains(loc) && !partition.getLocalBounds().contains(loc))
+							{
+								final int locToP = partition.toPartitionPID(loc); // we need to use this, not toP
+								transporter.transport((DObject) a, locToP, loc, ((HaloGrid2D) field).getFieldIndex());
+							}
+						}
+					}
+				}
+			}
+
+			// other types of storage
+			else
+			{
+				GridStorage st = ((HaloGrid2D) field).getStorage();
+
+				// go by point here
+				for (Int2D p : oldPartition.getPointList()) //should we ignore halobound here?
+					{
+					
+					// check if the new partition contains the point
+					if (!partition.getLocalBounds().contains(p))
+					{
+						final int toP = partition.toPartitionPID(p);
+
+						Serializable aList = st.getAllObjects(p);
+
+						if (aList != null)
+						{
+
+							// go backwards, so removing is safe
+							for (int i = ((ArrayList<Serializable>) aList).size() - 1; i >= 0; i--)
+							{
+								Serializable a = ((ArrayList<Serializable>) aList).get(i);
+																
+								// if a is stoppable
+								if (a != null && a instanceof Stopping && !migratedAgents.contains(a) && oldPartition.contains(p) && !partition.getLocalBounds().contains(p))
+								{
+									DSteppable stopping = ((DSteppable) a);
+									Stoppable stoppable = (Stoppable)(stopping.getStoppable());
+									
+								// stop agent in schedule, then migrate it
+								if (stoppable instanceof DistributedTentativeStep)
+									{
+									DistributedTentativeStep step = (DistributedTentativeStep) stoppable;
+									stoppable.stop();
+									transporter.transport(stopping, toP, p, ((HaloGrid2D) field).getFieldIndex(), step.getOrdering(), step.getTime());
+									}
+
+
+									// stop and migrate
+								else if (stoppable instanceof DistributedIterativeRepeat)
+									{
+									final DistributedIterativeRepeat step = (DistributedIterativeRepeat) stopping.getStoppable();
+									stoppable.stop();
+									transporter.transport(stopping, toP, p, ((HaloGrid2D) field).getFieldIndex(), step.getOrdering(), step.getTime(), step.getInterval());
+									}
+
+									migratedAgents.add(stopping);
+
+									// here the agent is removed from the old location TOCHECK!!!
+									// haloGrid2D.removeLocal(p, stopping.ID());
+									
+									st.removeObject(p, stopping.ID());
+								}
+
+								// not stoppable (transport a double or something) transporter call transportObject?
+								else if (oldPartition.contains(p) && !partition.getLocalBounds().contains(p) && !migratedAgents.contains(a))
+								{
+									transporter.transport(a, toP, p,((HaloGrid2D) field).getFieldIndex());
+								}
+								else
+								{
+									System.out.println(a + " not moved over");
+								}
+							}
+						}
+					}
+				}
+			}
 		}
-		
+		MPI.COMM_WORLD.barrier();
+		// Timing.stop(Timing.LB_OVERHEAD);
 	}
-    */
-	
+
+
+
+
+
+
+	////// GUNK
+
+
+
+
+
 	
 
+	
+
+	
+
+
+
+
+
+
+	//// DO WE NEED THE LOGGER ANY MORE?
+
+	static void initRemoteLogger(final String loggerName, final String logServAddr, final int logServPort)
+			throws IOException
+	{
+		final SocketHandler sh = new SocketHandler(logServAddr, logServPort);
+		sh.setLevel(Level.ALL);
+		sh.setFormatter(new java.util.logging.Formatter()
+		{
+			public String format(final LogRecord rec)
+			{
+				return String.format("[%s][%s][%s:%s][%-7s]\t %s",
+						new SimpleDateFormat("MM-dd-YYYY HH:mm:ss.SSS").format(new Date(rec.getMillis())),
+						rec.getLoggerName(), rec.getSourceClassName(), rec.getSourceMethodName(),
+						rec.getLevel().getLocalizedName(), rec.getMessage());
+			}
+		});
+		DSimState.logger = Logger.getLogger(loggerName);
+		DSimState.logger.setUseParentHandlers(false);
+		DSimState.logger.setLevel(Level.ALL);
+		DSimState.logger.addHandler(sh);
+	}
+
+	static void initLocalLogger(final String loggerName)
+	{
+		DSimState.logger = Logger.getLogger(loggerName);
+		DSimState.logger.setLevel(Level.ALL);
+		DSimState.logger.setUseParentHandlers(false);
+
+		final ConsoleHandler handler = new ConsoleHandler();
+		handler.setFormatter(new java.util.logging.Formatter()
+		{
+			public synchronized String format(final LogRecord rec)
+			{
+				return String.format("[%s][%-7s] %s%n",
+						new SimpleDateFormat("MM-dd-YYYY HH:mm:ss.SSS").format(new Date(rec.getMillis())),
+						rec.getLevel().getLocalizedName(), rec.getMessage());
+			}
+		});
+		DSimState.logger.addHandler(handler);
+	}
+	
 }

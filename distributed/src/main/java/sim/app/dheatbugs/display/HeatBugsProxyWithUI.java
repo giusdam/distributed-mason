@@ -6,18 +6,21 @@
 
 package sim.app.dheatbugs.display;
 
-import sim.engine.*;
-import sim.display.*;
-import sim.portrayal.grid.*;
-import sim.portrayal.*;
-import java.awt.*;
-import javax.swing.*;
-import sim.field.grid.*;
-import sim.util.*;
-import javax.swing.event.*;
-import java.awt.event.*;
-import java.awt.geom.*;
-import sim.portrayal.simple.*;
+import java.awt.Color;
+
+import javax.swing.JFrame;
+
+import sim.display.Controller;
+import sim.display.Display2D;
+import sim.display.GUIState;
+import sim.display.SimStateProxy;
+import sim.engine.SimState;
+import sim.portrayal.Inspector;
+import sim.portrayal.grid.DenseGridPortrayal2D;
+import sim.portrayal.grid.FastValueGridPortrayal2D;
+import sim.portrayal.simple.MovablePortrayal2D;
+import sim.util.Bag;
+import sim.util.Properties;
 
 public class HeatBugsProxyWithUI extends GUIState
     {
@@ -59,6 +62,35 @@ public class HeatBugsProxyWithUI extends GUIState
         super.start();
         // set up our portrayals
         setupPortrayals();
+        
+        //Inspector ins = Inspector.getInspector(((SimStateProxy)state).getStats(), this, "Properties");   
+        //Inspector ins = Inspector.getInspector(((SimStateProxy)state).getStatsAligned(), this, "Properties");   
+        //call a SimStateProxy getProperties I think (implement this, make it return a property object with all values
+        System.out.println("hello");
+        Properties prop_test = ((SimStateProxy)state).getProperties(0);  //null for some reason?
+        
+        System.out.println(prop_test.getClass());
+        
+        int numProp = ((SimStateProxy)state).getProperties(0).numProperties();
+        System.out.println(prop_test);
+        //System.exit(-1);
+        String method_name = ((SimStateProxy)state).getProperties(0).getName(0);
+        System.out.println(method_name);        
+        
+        Inspector ins = Inspector.getInspector(((SimStateProxy)state).getProperties(0), this, "Properties");   
+
+        
+        Bag insBag = new Bag();
+        Bag insName = new Bag();
+        insBag.add(ins);
+        insName.add("stats_inspector : "+state);
+        this.controller.setInspectors(insBag, insName);
+        
+        System.out.println(insName);
+        System.out.println("----");
+        System.out.println(insBag);
+        //System.exit(-1);
+        
         }
     
     public void load(SimState state)
@@ -105,6 +137,9 @@ public class HeatBugsProxyWithUI extends GUIState
 
         // specify the backdrop color  -- what gets painted behind the displays
         display.setBackdrop(Color.black);
+        
+
+        
         }
         
     public void quit()

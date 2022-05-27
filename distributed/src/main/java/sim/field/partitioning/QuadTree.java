@@ -1,7 +1,15 @@
 package sim.field.partitioning;
 
-import java.util.*;
-import sim.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+
+import sim.util.Int2D;
+import sim.util.IntRect2D;
+import sim.util.Number2D;
 
 public class QuadTree
 {
@@ -60,7 +68,7 @@ public class QuadTree
 		return allNodes.get(id);
 	}
 
-	public QuadTreeNode getLeafNode(final NumberND p)
+	public QuadTreeNode getLeafNode(final Number2D p)
 	{
 		return root.getLeafNode(p);
 	}
@@ -109,6 +117,7 @@ public class QuadTree
 	public void moveOrigin(final QuadTreeNode node, final Int2D newOrig)
 	{
 		List<QuadTreeNode> newNodes = node.split(newOrig);
+
 		for (int i = 0; i < newNodes.size(); i++)
 		{
 			addNode(newNodes.get(i));
@@ -117,6 +126,7 @@ public class QuadTree
 
 	public void moveOrigin(final int id, final Int2D newOrig)
 	{
+		// id = master of qtLevel-1 (o strunz che tiene i nodi foglia)
 		moveOrigin(getNode(id), newOrig);
 	}
 
@@ -279,8 +289,18 @@ public class QuadTree
 		//north
 		try
 		{
-		haloRegions.add(new IntRect2D(new Int2D((ul[0]+width)%width,(ul[1]-aoi+height)%height),
-				new Int2D((br[0]+width)%width==0?width:(br[0]+width)%width,(ul[1]+height)%height==0?height:(ul[1]+height)%height)));
+		haloRegions.add(
+			new IntRect2D(
+				new Int2D(
+					(ul[0]+width)%width,
+					(ul[1]-aoi+height)%height
+				),
+				new Int2D(
+					(br[0]+width)%width==0?width:(br[0]+width)%width,
+					(ul[1]+height)%height==0?height:(ul[1]+height)%height
+				)
+			)
+		);
 		}
 		catch (Exception e)
 		{

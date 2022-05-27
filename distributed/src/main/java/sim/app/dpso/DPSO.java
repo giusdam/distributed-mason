@@ -1,25 +1,15 @@
 package sim.app.dpso;
 
+import java.io.Serializable;
 import java.util.ArrayList;
-
 import java.util.List;
 
-import sim.app.dflockers.DFlocker;
-import sim.app.dflockers.DFlockers;
-import sim.app.dpso.Booth;
-import sim.app.dpso.Evaluatable;
-import sim.app.dpso.Griewangk;
-import sim.app.dpso.DParticle;
-import sim.app.dpso.Rastrigin;
-import sim.app.dpso.Rosenbrock;
 import sim.engine.DSimState;
 import sim.engine.DSteppable;
 import sim.engine.Schedule;
 import sim.engine.SimState;
-import sim.field.continuous.Continuous2D;
 import sim.field.continuous.DContinuous2D;
 import sim.util.Double2D;
-import sim.util.Int2D;
 import sim.util.MutableDouble2D;
 import sim.util.Timing;
 
@@ -39,7 +29,7 @@ public class DPSO extends DSimState {
     int prevSuccessCount = -1; 
     
     // public modifier values
-    public int numParticles = 10000;
+    public int numParticles = 100;
     public int getNumParticles() { return numParticles; }
     public void setNumParticles(int val) { if (val >= 0) numParticles = val; }
 
@@ -47,11 +37,11 @@ public class DPSO extends DSimState {
     public int getNeighborhoodSize() { return neighborhoodSize; }
     public void setNeighborhoodSize(int val) { if ((val >= 0) && (val <= numParticles)) neighborhoodSize = val; }
 
-    public double initialVelocityRange = 1.0;
+    public double initialVelocityRange = 0.1; //1.0;
     public double getInitialVelocityRange() { return initialVelocityRange; }
     public void setInitialVelocityRange(double val) { if (val >= 0.0) initialVelocityRange = val; }
     
-    public double velocityScalar = 2.7;
+    public double velocityScalar = 0.27; //2.7;
     public double getVelocityScalar() { return velocityScalar; }
     public void setVelocityScalar(double val) { if (val >= 0.0) velocityScalar = val; }
 
@@ -99,7 +89,14 @@ public class DPSO extends DSimState {
         super(seed, 10, 10, 1, false);  //what should these be
         }
     
-    
+	@Override
+	public void preSchedule()
+	{
+		// TODO Auto-generated method stub
+		super.preSchedule(); // do not forget this line
+		System.out.println("Size of agents in proc " + getPID() + " " + space.getAllAgentsInStorage().size() + " step : " + this.schedule.getSteps());
+	}
+	
     public void updateBest(double currVal, double currX, double currY)
     {
     
@@ -113,8 +110,7 @@ public class DPSO extends DSimState {
         best_y = currY;
         }
     
-    System.out.println("dpso updateBest called "+bestVal);
-    //System.exit(-1);
+    
     
     
     }
@@ -122,31 +118,34 @@ public class DPSO extends DSimState {
     
     public double getNeighborhoodBest(int index, MutableDouble2D pos)
     {
-    double bv = Double.NEGATIVE_INFINITY;
-    DParticle p;     
+        double bv = Double.NEGATIVE_INFINITY;
+        DParticle p;     
 
 
-    int start = (index - neighborhoodSize / 2);
-    if (start < 0)
-        start += numParticles;
+        int start = (index - neighborhoodSize / 2);
+        if (start < 0)
+            start += numParticles;
 
-    //List<DParticle> particle_list = space.getStorage().getObjects(space.getStorage().getShape());
-    List<DParticle> particle_list = space.getAllAgentsInStorage();
+        //List<DParticle> particle_list = space.getStorage().getObjects(space.getStorage().getShape());
+        List<DParticle> particle_list = space.getAllAgentsInStorage();
 
-    
-    
-    
-    for (int i = 0; i < neighborhoodSize; i++)
-        {
-        //p = particles[(start + i) % numParticles]; //access storage instead?  won't have a master list in distributed, I believe
-    	p = particle_list.get((start + i) % particle_list.size());
-        if (p.bestVal > bv)
+        
+        
+        
+        for (int i = 0; i < neighborhoodSize; i++)
             {
-            bv = p.bestVal;
-            pos.setTo(p.bestPosition);
+                //p = particles[(start + i) % numParticles]; //access storage instead?  won't have a master list in distributed, I believe
+                // if (particle_list.size() == 0) {
+                //     continue;
+                // }
+                p = particle_list.get((start + i) % particle_list.size());
+                if (p.bestVal > bv)
+                    {
+                    bv = p.bestVal;
+                    pos.setTo(p.bestPosition);
+                    }
             }
-        }
-    return 1.0;             
+        return 1.0;             
     }
     
 	@Override
@@ -171,12 +170,12 @@ public class DPSO extends DSimState {
         final DParticle p = new DParticle(x, y, vx, vy, f, i);
         
         particles[i] = p;
-        System.out.println(particles[i]+" "+particles[i].position);
+        //System.out.println(particles[i]+" "+particles[i].position);
 		
 
 
 	    }
-        
+
 		sendRootInfoToAll("particles", particles);
 
 	    
@@ -192,7 +191,7 @@ public class DPSO extends DSimState {
 		super.start(); // do not forget this line
 
 		bestVal = 0;  //how do I keep track of global?
-        System.out.println("best set to 0");
+        //System.out.println("best set to 0");
         
 		DParticle[] particles = (DParticle[]) getRootInfo("particles");
 		
@@ -200,13 +199,12 @@ public class DPSO extends DSimState {
 			DParticle a = (DParticle) p;
 			//System.out.println(a.bestVal);
 			
-			Double2D storagePos = masonSpaceToProblemBounds(a.position);
+			Double2D storagePos = problemSpaceToMasonStorageBounds(a.position);
 			if (partition.getLocalBounds().contains(storagePos)) {
 				
-				  this.space.addAgent(storagePos, a, 0, 0);
+				  this.space.addAgent(storagePos, a, 0, 0, 1);
 			}
 		}
-		
 		
         schedule.scheduleRepeating(Schedule.EPOCH, 1, new DSteppable()
         {
@@ -230,11 +228,11 @@ public class DPSO extends DSimState {
                     state.kill();
                 }
             
-        	System.out.println(getPID()+" before "+bestVal+" x: "+best_x+" y: "+best_y);
+        	//System.out.println(getPID()+" before "+bestVal+" x: "+best_x+" y: "+best_y);
 
-        	updateGlobal();
+        	//updateGlobals();
         	
-        	System.out.println(getPID()+" after "+bestVal+" x: "+best_x+" y: "+best_y);
+        	//System.out.println(getPID()+" after "+bestVal+" x: "+best_x+" y: "+best_y);
         	//System.exit(-1);
 
             }
@@ -246,20 +244,47 @@ public class DPSO extends DSimState {
 	}
 	
 	//Mason bounds top left is 0,0, while problems in dpso usually have 0,0 in the middle.
-	public Double2D masonSpaceToProblemBounds(MutableDouble2D p) {
+	//input real problem value (center is 0.0), outputs storage location (top left is 0.0)
+	public Double2D problemSpaceToMasonStorageBounds(MutableDouble2D p) {
 		
 		Double2D newPoint = new Double2D(p.getX()+ (width * 0.5), p.getY() + (height * 0.5));
 		return newPoint;
 		
 	}
 	
-    protected Object[] getPartitionGlobals() {
+	
+	//we want to keep track of best point, so each partion gives an array where:
+	//index 0 is the value
+	//index 1 and 2 are position values (x and y)
+	//we want to pick the best index 0 and its corresponding x and y
+
+	protected Serializable[] arbitrateGlobals(ArrayList<Serializable[]> global)
+	{
+		int chosen_index = 0;
+		Object chosen_item = global.get(0)[0];
+
+		double best_val = (double) chosen_item; // make type invariant
+
+		for (int i = 0; i < partition.getNumProcessors(); i++)
+		{
+			if ((double) global.get(i)[0] > best_val)
+			{
+				best_val = (double) global.get(i)[0];
+				chosen_index = i;
+			}
+		}
+
+		return global.get(chosen_index);
+	}
+	
+	
+    protected Serializable[] getPartitionGlobals() {
     	
     	//first element is score
     	//second element is x
     	//third element is y
     	
-    	Object[] o = new Object[3];
+    	Serializable[] o = new Serializable[3];
         o[0] = bestVal;
         o[1] = best_x;
         o[2] = best_y;
@@ -271,7 +296,7 @@ public class DPSO extends DSimState {
     }
 
     
-    protected void setPartitionGlobals(Object[] o) {
+    protected void setPartitionGlobals(Serializable[] o) {
     	
     	bestVal = (double) o[0];
     	best_x = (double) o[1];
