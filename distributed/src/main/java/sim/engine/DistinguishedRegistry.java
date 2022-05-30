@@ -1,6 +1,8 @@
 package sim.engine;
 
 import java.net.InetAddress;
+import java.net.NetworkInterface;
+import java.net.SocketException;
 import java.rmi.AccessException;
 import java.rmi.AlreadyBoundException;
 import java.rmi.NotBoundException;
@@ -12,6 +14,7 @@ import java.rmi.server.UnicastRemoteObject;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.logging.ConsoleHandler;
@@ -23,64 +26,82 @@ import mpi.MPI;
 import sim.util.*;
 
 /**
-	The utility class to register and update Distinguished objects on the RMI Registry.  This class
-	allows you to register them, and also handled re-registering them with new DSimStates as the
-	objects migrate from partition to partition.
+   The utility class to register and update Distinguished objects on the RMI Registry.  This class
+   allows you to register them, and also handled re-registering them with new DSimStates as the
+   objects migrate from partition to partition.
 **/
 
 
 public class DistinguishedRegistry
-{
-	 static final long serialVersionUID = 1L;
+    {
+    static final long serialVersionUID = 1L;
 
-	public static final int PORT = 5000;
-	
-	public static Logger logger;
+    public static final int PORT = 5000;
+        
+    public static Logger logger;
 
-	 static DistinguishedRegistry instance;
+    static DistinguishedRegistry instance;
 
-	 static int port;
-	 static int rank;
+    static int port;
+    static int rank;
 
-	 static Registry registry;
-	 static HashMap<String, Remote> exportedNames = new HashMap<>();
-	 static HashMap<Remote, String> exportedObjects = new HashMap<>();
-	 /* ID of the migrated objects */
-	 static List<String> migratedNames = new ArrayList<String>();
+    static Registry registry;
+    static HashMap<String, Remote> exportedNames = new HashMap<>();
+    static HashMap<Remote, String> exportedObjects = new HashMap<>();
+    /* ID of the migrated objects */
+    static List<String> migratedNames = new ArrayList<String>();
 
-	 static void initLocalLogger(final String loggerName)
-	 {
-		DistinguishedRegistry.logger = Logger.getLogger(DistinguishedRegistry.class.getName());
-		DistinguishedRegistry.logger.setLevel(Level.ALL);
-		DistinguishedRegistry.logger.setUseParentHandlers(false);
+    static void initLocalLogger(final String loggerName)
+        {
+        DistinguishedRegistry.logger = Logger.getLogger(DistinguishedRegistry.class.getName());
+        DistinguishedRegistry.logger.setLevel(Level.ALL);
+        DistinguishedRegistry.logger.setUseParentHandlers(false);
 
-		final ConsoleHandler handler = new ConsoleHandler();
-		handler.setFormatter(new java.util.logging.Formatter()
-		{
-			public synchronized String format(final LogRecord rec)
-			{
-				return String.format(loggerName + " [%s][%-7s] %s%n",
-						new SimpleDateFormat("MM-dd-YYYY HH:mm:ss.SSS").format(new Date(rec.getMillis())),
-						rec.getLevel().getLocalizedName(), rec.getMessage());
-			}
-		});
-		DistinguishedRegistry.logger.addHandler(handler);
-	}
+        final ConsoleHandler handler = new ConsoleHandler();
+        handler.setFormatter(new java.util.logging.Formatter()
+            {
+            public synchronized String format(final LogRecord rec)
+                {
+                return String.format(loggerName + " [%s][%-7s] %s%n",
+                    new SimpleDateFormat("MM-dd-YYYY HH:mm:ss.SSS").format(new Date(rec.getMillis())),
+                    rec.getLevel().getLocalizedName(), rec.getMessage());
+                }
+            });
+        DistinguishedRegistry.logger.addHandler(handler);
+        }
 
-	 DistinguishedRegistry() throws NumberFormatException, Exception
-	 {
-		if (instance != null)
-		{
-			throw new RuntimeException(
-					"Use getInstance() method to get the single instance of the Distributed Registry.");
-		}
-		rank = MPI.COMM_WORLD.getRank();
-		initLocalLogger(String.format("MPI-Job-%d", rank));
+    DistinguishedRegistry() throws NumberFormatException, Exception
+        {
+        if (instance != null)
+            {
+            throw new RuntimeException(
+                "Use getInstance() method to get the single instance of the Distributed Registry.");
+            }
+        rank = MPI.COMM_WORLD.getRank();
+        initLocalLogger(String.format("MPI-Job-%d", rank));
 
-		// TODO: hard coding the port for now
-		// port = getAvailablePort();
-		port = PORT;
-		String myip = InetAddress.getLocalHost().getHostAddress();
+        // TODO: hard coding the port for now
+        // port = getAvailablePort();
+        port = PORT;
+        String myip = InetAddress.getLocalHost().getHostAddress();
+
+        try {
+            Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
+            while (interfaces.hasMoreElements()) {
+                NetworkInterface iface = interfaces.nextElement();
+                // filters out 127.0.0.1 and inactive interfaces
+                if (iface.isLoopback() || !iface.isUp())
+                    continue;
+
+                Enumeration<InetAddress> addresses = iface.getInetAddresses();
+                while(addresses.hasMoreElements()) {
+                    InetAddress addr = addresses.nextElement();
+                    myip = addr.getHostAddress();
+                }
+            }
+        } catch (SocketException e) {
+            throw new RuntimeException(e);
+        }
 
 		if (rank == 0)
 		{
